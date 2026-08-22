@@ -1,4 +1,4 @@
-import { DEFAULT_AUTO_COMPACT_PERCENT, isValidAutoCompactPercent, normalizeAutoCompactPercent } from "./auto-compact.ts";
+import { isValidAutoCompactPercent, normalizeAutoCompactPercent } from "./auto-compact.ts";
 
 /// 把 model_windows JSON map 按 model_list 行顺序转成文本（每行一个窗口，空行表示默认）。
 export function modelWindowsMapToText(modelList: string, modelWindows: string): string {
@@ -32,7 +32,7 @@ export type ImageHandling = "" | "send-as-is" | "strip" | "vlm";
 export type ModelWindowRow = {
   model: string;
   window: string;
-  /// 自动压缩百分比；空值在保存时使用 Codex++ 的明确默认值 90%。
+  /// 自动压缩百分比；空字符串表示沿用 Codex 默认行为。
   autoCompact: string;
   imageHandling: ImageHandling;
 };
@@ -41,11 +41,6 @@ export type ModelWindowRowsValidationIssue = {
   code: "duplicateModel" | "invalidWindow" | "invalidAutoCompact";
   model: string;
 };
-
-function asStringMap(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, string>;
-}
 
 export function isValidModelWindow(value: string): boolean {
   const trimmed = value.trim();
@@ -106,13 +101,13 @@ export function modelWindowRowsFromProfile(
 ): ModelWindowRow[] {
   let map: Record<string, string> = {};
   try {
-    map = asStringMap(JSON.parse(modelWindows || "{}"));
+    map = JSON.parse(modelWindows || "{}") as Record<string, string>;
   } catch {
     map = {};
   }
   let autoCompactMap: Record<string, string> = {};
   try {
-    autoCompactMap = asStringMap(JSON.parse(modelAutoCompact || "{}"));
+    autoCompactMap = JSON.parse(modelAutoCompact || "{}") as Record<string, string>;
   } catch {
     autoCompactMap = {};
   }
@@ -139,9 +134,7 @@ export function modelWindowRowsFromProfile(
       model,
       window: typeof map[model] === "string" ? map[model] : "",
       autoCompact: normalizeAutoCompactPercent(
-        typeof autoCompactMap[model] === "string"
-          ? autoCompactMap[model]
-          : DEFAULT_AUTO_COMPACT_PERCENT,
+        typeof autoCompactMap[model] === "string" ? autoCompactMap[model] : "",
       ),
       imageHandling: vlmMap[model] ?? "send-as-is",
     }));
@@ -170,10 +163,10 @@ export function serializeModelWindowRows(rows: ModelWindowRow[]): {
     if (row.imageHandling === "vlm" || row.imageHandling === "strip") {
       modelVlm[model] = row.imageHandling;
     }
-    const autoCompact = normalizeAutoCompactPercent(
-      row.autoCompact?.trim() || DEFAULT_AUTO_COMPACT_PERCENT,
-    );
-    modelAutoCompact[model] = autoCompact;
+    const autoCompact = row.autoCompact?.trim() ?? "";
+    if (autoCompact) {
+      modelAutoCompact[model] = autoCompact;
+    }
   });
   return {
     modelList: modelList.join("\n"),
