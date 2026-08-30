@@ -2987,6 +2987,9 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
     profile.upstream_base_url = source_base_url.clone();
     profile.base_url = source_base_url;
     profile.api_key = relay_profile_api_key(profile);
+    if profile.uses_no_auth() {
+        profile.api_key.clear();
+    }
     Ok(())
 }
 
