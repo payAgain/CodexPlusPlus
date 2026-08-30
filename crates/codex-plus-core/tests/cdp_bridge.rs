@@ -1375,8 +1375,90 @@ fn injection_script_unlocks_custom_model_catalog() {
     assert!(!script.contains("function patchObjectGraphForModels"));
     assert!(!script.contains("window.dispatchEvent = function patchedCodexPlusDispatchEvent"));
     assert!(script.contains("String(name) === \"107580212\""));
+    assert!(script.contains("isDefault: false"));
+    assert!(!script.contains("value.defaultModel = codexPlusModelDescriptor(names[0])"));
+    assert!(!script.contains("value.model = value.defaultModel"));
+    assert!(!script.contains("default_model: value.default_model || names[0]"));
+    assert!(!script.contains("default_model: names[0] || value.default_model"));
     assert!(script.contains("window.addEventListener(\"codex-message-from-view\""));
     assert!(!script.contains("querySelectorAll(\"button, [role='menu']"));
+}
+
+#[test]
+fn model_whitelist_never_claims_the_host_default_model() {
+    let script = assets::injection_script(57321);
+    let start = script
+        .find("function codexPlusModelDescriptor(modelName)")
+        .expect("model descriptor patch should exist");
+    let end = script[start..]
+        .find("\n  function statsigClients()")
+        .map(|offset| start + offset)
+        .expect("model whitelist patch should have a stable end marker");
+    let function_source = &script[start..end];
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let harness_path = temp.path().join("model-default-harness.cjs");
+    std::fs::write(
+        &harness_path,
+        format!(
+            r#"
+const codexModelCatalog = {{
+  default_model: "supplier-default",
+  model: "supplier-default",
+  provider_name: "Supplier",
+  model_provider: "custom",
+}};
+const codexPlusModelMetadata = () => null;
+const modelReasoningEfforts = () => [];
+const applyCodexPlusModelMetadata = () => false;
+const codexPlusModelNames = () => ["supplier-default", "extra-model"];
+{function_source}
+
+const missingDefault = {{ value: {{ available_models: ["native-model"] }} }};
+const patchedMissingDefault = patchStatsigModelDynamicConfig(missingDefault);
+if (Object.prototype.hasOwnProperty.call(patchedMissingDefault.value, "default_model")) process.exit(2);
+if (!patchedMissingDefault.value.available_models.includes("supplier-default")) process.exit(3);
+if (!patchedMissingDefault.value.available_models.includes("extra-model")) process.exit(4);
+
+const existingDefault = {{ value: {{ available_models: ["native-model"], default_model: "thread-model" }} }};
+const patchedExistingDefault = patchStatsigModelDynamicConfig(existingDefault);
+if (patchedExistingDefault.value.default_model !== "thread-model") process.exit(5);
+
+const missingContainerDefault = {{
+  models: [{{ model: "native-model", isDefault: true }}],
+  availableModels: ["native-model"],
+}};
+patchModelContainer(missingContainerDefault);
+if (Object.prototype.hasOwnProperty.call(missingContainerDefault, "defaultModel")) process.exit(6);
+if (Object.prototype.hasOwnProperty.call(missingContainerDefault, "model")) process.exit(7);
+const injectedDefault = missingContainerDefault.models.find((item) => item.model === "supplier-default");
+if (!injectedDefault || injectedDefault.isDefault !== false) process.exit(8);
+
+const hostDefault = {{ model: "native-model" }};
+const hostModel = {{ model: "thread-model" }};
+const existingContainerDefault = {{
+  models: [{{ model: "native-model", isDefault: true }}],
+  availableModels: ["native-model"],
+  defaultModel: hostDefault,
+  model: hostModel,
+}};
+patchModelContainer(existingContainerDefault);
+if (existingContainerDefault.defaultModel !== hostDefault) process.exit(9);
+if (existingContainerDefault.model !== hostModel) process.exit(10);
+"#
+        ),
+    )
+    .expect("model default harness should be written");
+
+    let output = Command::new("node")
+        .arg(&harness_path)
+        .output()
+        .expect("node should run model default harness");
+    assert!(
+        output.status.success(),
+        "node harness failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
