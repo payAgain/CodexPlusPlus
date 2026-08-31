@@ -15,6 +15,7 @@ use codex_plus_core::settings::{
 };
 use codex_plus_core::status::{LaunchStatus, StatusStore};
 use codex_plus_core::user_scripts::UserScriptManager;
+use codex_plus_core::zed_remote::{ZedOpenStrategy, ZedRemoteProject};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -83,6 +84,66 @@ struct WeixinQrSession {
 
 struct WeixinRuntime {
     stop: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinImagePayload {
+    pub path: String,
+    pub content_type: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinRuntimeRequest {
+    pub debug_port: u16,
+    #[serde(default = "default_dream_skin_helper_port")]
+    pub helper_port: u16,
+    #[serde(default)]
+    pub screenshot_path: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinThemeActivationRequest {
+    pub draft: codex_plus_core::dream_skin_library::DreamSkinThemeDraft,
+    pub debug_port: u16,
+    #[serde(default = "default_dream_skin_helper_port")]
+    pub helper_port: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinThemeActivationPayload {
+    pub library: codex_plus_core::dream_skin_library::DreamSkinThemeLibrary,
+    pub runtime: codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus,
+    pub saved_for_next_launch: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinMarketPayload {
+    pub schema_version: u8,
+    pub updated_at: String,
+    pub repository_url: String,
+    pub cached: bool,
+    pub warning: String,
+    pub themes: Vec<codex_plus_core::dream_skin_market::DreamSkinMarketTheme>,
+}
+
+pub type DreamSkinCommunityPayload =
+    codex_plus_core::dream_skin_community::DreamSkinCommunityCatalog;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingDreamSkinCommunityPayload {
+    pub version_id: String,
+}
+
+struct ManagedDreamSkinImageBackup {
+    path: PathBuf,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -171,6 +232,19 @@ pub struct ListLocalSessionsRequest {
     pub limit: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZedRemoteProjectsPayload {
+    pub projects: Vec<ZedRemoteProject>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZedRemoteOpenPayload {
+    pub url: String,
+    pub strategy: ZedOpenStrategy,
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteLocalSessionRequest {
@@ -244,6 +318,13 @@ pub struct RelayProfileTestPayload {
     pub http_status: u16,
     pub endpoint: String,
     pub response_preview: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepwiseTestPayload {
+    pub item_count: usize,
+    pub error: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -390,6 +471,12 @@ pub struct WatcherPayload {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AdsPayload {
+    pub version: u64,
+    pub ads: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ScriptMarketPayload {
     pub market: Value,
     pub user_scripts: Value,
@@ -405,13 +492,55 @@ pub struct SkillsPayload {
     pub repo_errors: Vec<String>,
     pub skills_dir: String,
     pub codex_skills_dir: String,
-    pub agents_skills_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartupPayload {
     pub show_update: bool,
+}
+
+#[tauri::command]
+pub fn load_grok_config() -> CommandResult<codex_plus_core::grok_config::GrokConfigPayload> {
+    match codex_plus_core::grok_config::load_grok_config() {
+        Ok(payload) => ok("Grok 配置已加载。", payload),
+        Err(error) => failed(
+            &format!("读取 Grok 配置失败：{error}"),
+            empty_grok_config_payload(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn save_grok_config(
+    request: codex_plus_core::grok_config::SaveGrokConfigRequest,
+) -> CommandResult<codex_plus_core::grok_config::SaveGrokConfigResult> {
+    let backup_root = codex_plus_core::paths::default_app_state_dir().join("backups");
+    match codex_plus_core::grok_config::save_grok_config(&request, &backup_root) {
+        Ok(payload) => ok("Grok 配置已保存。", payload),
+        Err(error) => failed(
+            &format!("保存 Grok 配置失败：{error}"),
+            codex_plus_core::grok_config::SaveGrokConfigResult {
+                config: empty_grok_config_payload(),
+                backup_path: None,
+            },
+        ),
+    }
+}
+
+fn empty_grok_config_payload() -> codex_plus_core::grok_config::GrokConfigPayload {
+    let home = codex_plus_core::grok_config::default_grok_home_dir();
+    codex_plus_core::grok_config::GrokConfigPayload {
+        grok_home: home.to_string_lossy().to_string(),
+        config_path: home.join("config.toml").to_string_lossy().to_string(),
+        config_exists: false,
+        cli_path: None,
+        cli_installed: false,
+        revision: String::new(),
+        default_model: String::new(),
+        models_base_url: String::new(),
+        models: Vec::new(),
+    }
 }
 
 #[tauri::command]
@@ -1231,10 +1360,14 @@ pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload
         );
     };
     let store = SettingsStore::default();
-    match store.save(&settings) {
-        Ok(()) => settings_payload("设置已保存。", "设置保存后重新读取失败"),
-        Err(error) => failed(
-            &format!("保存设置失败：{error}"),
+    let previous = store.load().unwrap_or_default();
+    let dream_skin_enabled = settings.enhancements_enabled && settings.codex_app_dream_skin_enabled;
+    if let Err(error) = codex_plus_core::dream_skin::sync_default_dream_skin_base_theme(
+        dream_skin_enabled,
+        &settings.codex_app_dream_skin_theme_config,
+    ) {
+        return failed(
+            &format!("保存皮肤基础主题失败：{error}"),
             SettingsPayload {
                 settings,
                 settings_path: codex_plus_core::paths::default_settings_path()
@@ -1242,7 +1375,811 @@ pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload
                     .to_string(),
                 user_scripts: user_script_inventory(),
             },
+        );
+    }
+    match store.save(&settings) {
+        Ok(()) => settings_payload("设置已保存。", "设置保存后重新读取失败"),
+        Err(error) => {
+            let _ = codex_plus_core::dream_skin::sync_default_dream_skin_base_theme(
+                previous.enhancements_enabled && previous.codex_app_dream_skin_enabled,
+                &previous.codex_app_dream_skin_theme_config,
+            );
+            failed(
+                &format!("保存设置失败：{error}"),
+                SettingsPayload {
+                    settings,
+                    settings_path: codex_plus_core::paths::default_settings_path()
+                        .to_string_lossy()
+                        .to_string(),
+                    user_scripts: user_script_inventory(),
+                },
+            )
+        }
+    }
+}
+
+#[tauri::command]
+pub fn import_dream_skin_image(path: String) -> CommandResult<DreamSkinImagePayload> {
+    let source = PathBuf::from(path.trim());
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    let previous_path = PathBuf::from(previous.codex_app_dream_skin_image_path.trim());
+    let previous_backup = managed_dream_skin_image_backup(&previous_path, &state_dir).ok();
+
+    let imported = match codex_plus_core::dream_skin::import_dream_skin_image(&source, &state_dir) {
+        Ok(path) => path,
+        Err(error) => {
+            return failed(
+                &format!("导入皮肤图片失败：{error}"),
+                empty_dream_skin_image_payload(),
+            );
+        }
+    };
+    if let Err(error) = store.update(json!({
+        "codexAppDreamSkinImagePath": imported.to_string_lossy()
+    })) {
+        let _ = codex_plus_core::dream_skin::clear_managed_dream_skin_image(&state_dir);
+        if let Some(backup) = previous_backup {
+            let _ = restore_managed_dream_skin_image_backup(backup);
+        }
+        return failed(
+            &format!("保存皮肤图片设置失败：{error}"),
+            empty_dream_skin_image_payload(),
+        );
+    }
+
+    let size_bytes = fs::metadata(&imported)
+        .map(|metadata| metadata.len())
+        .unwrap_or_default();
+    ok(
+        "皮肤图片已导入。",
+        DreamSkinImagePayload {
+            path: imported.to_string_lossy().to_string(),
+            content_type: dream_skin_content_type(&imported).to_string(),
+            size_bytes,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn reset_dream_skin_image() -> CommandResult<DreamSkinImagePayload> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    if let Err(error) = store.update(json!({ "codexAppDreamSkinImagePath": "" })) {
+        return failed(
+            &format!("恢复默认皮肤图片失败：{error}"),
+            empty_dream_skin_image_payload(),
+        );
+    }
+    if let Err(error) = codex_plus_core::dream_skin::clear_managed_dream_skin_image(&state_dir) {
+        let _ = store.update(json!({
+            "codexAppDreamSkinImagePath": previous.codex_app_dream_skin_image_path
+        }));
+        return failed(
+            &format!("清理自定义皮肤图片失败：{error}"),
+            empty_dream_skin_image_payload(),
+        );
+    }
+    ok("已恢复目标项目默认图片。", empty_dream_skin_image_payload())
+}
+
+#[tauri::command]
+pub fn list_dream_skin_themes()
+-> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match current_dream_skin_library(&settings) {
+        Ok(library) => ok("Dream Skin 主题库已加载。", library),
+        Err(error) => failed(
+            &format!("读取 Dream Skin 主题库失败：{error}"),
+            empty_dream_skin_library(&settings),
         ),
+    }
+}
+
+#[tauri::command]
+pub async fn refresh_dream_skin_market() -> CommandResult<DreamSkinMarketPayload> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    match codex_plus_core::dream_skin_market::load_market(&state_dir).await {
+        Ok(load) => {
+            let message = if load.cached {
+                "已加载主题市场缓存。"
+            } else {
+                "主题市场已刷新。"
+            };
+            ok(message, dream_skin_market_payload(load))
+        }
+        Err(error) => failed(
+            &format!("主题市场加载失败：{error}"),
+            empty_dream_skin_market_payload(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn refresh_dream_skin_community() -> CommandResult<DreamSkinCommunityPayload> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    match codex_plus_core::dream_skin_community::load_community_catalog(&state_dir).await {
+        Ok(catalog) => ok("DreamSkin 社区已刷新。", catalog),
+        Err(error) => failed(
+            &format!("DreamSkin 社区加载失败：{error}"),
+            empty_dream_skin_community_payload(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn install_dream_skin_community_theme(
+    id: String,
+) -> CommandResult<DreamSkinCommunityPayload> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let installed =
+        match codex_plus_core::dream_skin_community::install_community_theme(&state_dir, id.trim())
+            .await
+        {
+            Ok(installed) => installed,
+            Err(error) => {
+                return failed(
+                    &format!("安装 DreamSkin 社区主题失败：{error}"),
+                    codex_plus_core::dream_skin_community::load_community_catalog(&state_dir)
+                        .await
+                        .unwrap_or_else(|_| empty_dream_skin_community_payload()),
+                );
+            }
+        };
+    match codex_plus_core::dream_skin_community::load_community_catalog(&state_dir).await {
+        Ok(mut catalog) => {
+            catalog.installed_theme_id = installed.id;
+            ok("主题已安装到“我的主题”。", catalog)
+        }
+        Err(_) => {
+            let mut catalog = empty_dream_skin_community_payload();
+            catalog.installed_theme_id = installed.id;
+            ok("主题已安装到“我的主题”。", catalog)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn load_pending_dream_skin_community() -> CommandResult<PendingDreamSkinCommunityPayload> {
+    match codex_plus_core::dream_skin_community::load_pending_community_link() {
+        Ok(version_id) => ok(
+            "待处理的一键换肤链接已读取。",
+            PendingDreamSkinCommunityPayload {
+                version_id: version_id.unwrap_or_default(),
+            },
+        ),
+        Err(error) => failed(
+            &format!("读取一键换肤链接失败：{error}"),
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn confirm_pending_dream_skin_community() -> CommandResult<DreamSkinCommunityPayload> {
+    let version_id = match codex_plus_core::dream_skin_community::load_pending_community_link() {
+        Ok(Some(version_id)) => version_id,
+        Ok(None) => {
+            return failed(
+                "没有待处理的一键换肤链接。",
+                empty_dream_skin_community_payload(),
+            );
+        }
+        Err(error) => {
+            return failed(
+                &format!("读取一键换肤链接失败：{error}"),
+                empty_dream_skin_community_payload(),
+            );
+        }
+    };
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let installed = match codex_plus_core::dream_skin_community::install_community_theme(
+        &state_dir,
+        &version_id,
+    )
+    .await
+    {
+        Ok(installed) => installed,
+        Err(error) => {
+            return failed(
+                &format!("安装 DreamSkin 社区主题失败：{error}"),
+                codex_plus_core::dream_skin_community::load_community_catalog(&state_dir)
+                    .await
+                    .unwrap_or_else(|_| empty_dream_skin_community_payload()),
+            );
+        }
+    };
+    if let Err(error) = codex_plus_core::dream_skin_community::clear_pending_community_link() {
+        return failed(
+            &format!("主题已安装，但清理一键换肤记录失败：{error}"),
+            codex_plus_core::dream_skin_community::load_community_catalog(&state_dir)
+                .await
+                .unwrap_or_else(|_| empty_dream_skin_community_payload()),
+        );
+    }
+    let mut catalog = codex_plus_core::dream_skin_community::load_community_catalog(&state_dir)
+        .await
+        .unwrap_or_else(|_| empty_dream_skin_community_payload());
+    catalog.installed_theme_id = installed.id;
+    ok("主题已安装，正在应用。", catalog)
+}
+
+#[tauri::command]
+pub fn dismiss_pending_dream_skin_community() -> CommandResult<PendingDreamSkinCommunityPayload> {
+    match codex_plus_core::dream_skin_community::clear_pending_community_link() {
+        Ok(()) => ok(
+            "已取消一键换肤。",
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
+        ),
+        Err(error) => failed(
+            &format!("取消一键换肤失败：{error}"),
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn import_dream_skin_theme_package(
+    path: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    match codex_plus_core::dream_skin_community::import_theme_package(
+        &state_dir,
+        Path::new(path.trim()),
+    ) {
+        Ok(_) => match current_dream_skin_library(&settings) {
+            Ok(library) => ok("DreamSkin 主题包已导入。", library),
+            Err(error) => failed(
+                &format!("主题包已导入，但刷新主题库失败：{error}"),
+                empty_dream_skin_library(&settings),
+            ),
+        },
+        Err(error) => failed(
+            &format!("导入 DreamSkin 主题包失败：{error}"),
+            current_dream_skin_library(&settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn install_dream_skin_market_theme(id: String) -> CommandResult<DreamSkinMarketPayload> {
+    let id = id.trim();
+    if id.is_empty() {
+        return failed("主题 ID 不能为空。", empty_dream_skin_market_payload());
+    }
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let load = match codex_plus_core::dream_skin_market::load_market(&state_dir).await {
+        Ok(load) => load,
+        Err(error) => {
+            return failed(
+                &format!("主题市场加载失败：{error}"),
+                empty_dream_skin_market_payload(),
+            );
+        }
+    };
+    let Some(theme) = load.manifest.themes.iter().find(|theme| theme.id == id) else {
+        return failed(
+            "主题市场清单中未找到该主题。",
+            dream_skin_market_payload(load),
+        );
+    };
+    if let Err(error) =
+        codex_plus_core::dream_skin_market::install_market_theme(&state_dir, theme).await
+    {
+        return failed(
+            &format!("安装市场主题失败：{error}"),
+            dream_skin_market_payload(load),
+        );
+    }
+    let manifest =
+        codex_plus_core::dream_skin_market::enrich_market_manifest(&state_dir, load.manifest);
+    ok(
+        "主题已安装到“我的主题”。",
+        DreamSkinMarketPayload {
+            schema_version: manifest.schema_version,
+            updated_at: manifest.updated_at,
+            repository_url: codex_plus_core::dream_skin_market::DEFAULT_MARKET_REPOSITORY_URL
+                .to_string(),
+            cached: load.cached,
+            warning: load.warning.unwrap_or_default(),
+            themes: manifest.themes,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn load_dream_skin_theme(
+    id: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeDraft> {
+    match codex_plus_core::dream_skin_library::load_stored_dream_skin_theme(
+        &codex_plus_core::paths::default_app_state_dir(),
+        id.trim(),
+    ) {
+        Ok(draft) => ok("Dream Skin 主题已加载。", draft),
+        Err(error) => failed(
+            &format!("加载 Dream Skin 主题失败：{error}"),
+            builtin_dream_skin_draft(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn create_dream_skin_theme(
+    path: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeDraft> {
+    let source = PathBuf::from(path.trim());
+    match codex_plus_core::dream_skin_library::create_dream_skin_theme_from_image(
+        &source,
+        &codex_plus_core::paths::default_app_state_dir(),
+    ) {
+        Ok(draft) => ok("Dream Skin 主题已创建。", draft),
+        Err(error) => failed(
+            &format!("创建 Dream Skin 主题失败：{error}"),
+            builtin_dream_skin_draft(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn save_dream_skin_theme(
+    draft: codex_plus_core::dream_skin_library::DreamSkinThemeDraft,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match codex_plus_core::dream_skin_library::save_dream_skin_theme(
+        &codex_plus_core::paths::default_app_state_dir(),
+        &draft,
+    ) {
+        Ok(_) => match current_dream_skin_library(&settings) {
+            Ok(library) => ok("Dream Skin 主题已保存。", library),
+            Err(error) => failed(
+                &format!("主题已保存，但刷新主题库失败：{error}"),
+                empty_dream_skin_library(&settings),
+            ),
+        },
+        Err(error) => failed(
+            &format!("保存 Dream Skin 主题失败：{error}"),
+            current_dream_skin_library(&settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn rename_dream_skin_theme(
+    id: String,
+    name: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match codex_plus_core::dream_skin_library::rename_dream_skin_theme(
+        &codex_plus_core::paths::default_app_state_dir(),
+        id.trim(),
+        name.trim(),
+    ) {
+        Ok(_) => match current_dream_skin_library(&settings) {
+            Ok(library) => ok("Dream Skin 主题已重命名。", library),
+            Err(error) => failed(
+                &format!("主题已重命名，但刷新主题库失败：{error}"),
+                empty_dream_skin_library(&settings),
+            ),
+        },
+        Err(error) => failed(
+            &format!("重命名 Dream Skin 主题失败：{error}"),
+            current_dream_skin_library(&settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn delete_dream_skin_theme(
+    id: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match codex_plus_core::dream_skin_library::delete_dream_skin_theme(
+        &codex_plus_core::paths::default_app_state_dir(),
+        id.trim(),
+        Some(settings.codex_app_dream_skin_theme_config.id.as_str()),
+    ) {
+        Ok(()) => match current_dream_skin_library(&settings) {
+            Ok(library) => ok("Dream Skin 主题已删除。", library),
+            Err(error) => failed(
+                &format!("主题已删除，但刷新主题库失败：{error}"),
+                empty_dream_skin_library(&settings),
+            ),
+        },
+        Err(error) => failed(
+            &format!("删除 Dream Skin 主题失败：{error}"),
+            current_dream_skin_library(&settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn activate_dream_skin_theme(
+    request: DreamSkinThemeActivationRequest,
+) -> CommandResult<DreamSkinThemeActivationPayload> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    let previous_runtime_signature =
+        codex_plus_core::assets::dream_skin_runtime_content_signature(&previous);
+    let previous_path = PathBuf::from(previous.codex_app_dream_skin_image_path.trim());
+    let previous_backup = managed_dream_skin_image_backup(&previous_path, &state_dir).ok();
+    let activation = match codex_plus_core::dream_skin_library::prepare_dream_skin_activation(
+        &state_dir,
+        &request.draft,
+    ) {
+        Ok(activation) => activation,
+        Err(error) => {
+            return failed(
+                &format!("准备 Dream Skin 主题失败：{error}"),
+                failed_dream_skin_activation_payload(&previous, request.debug_port).await,
+            );
+        }
+    };
+    let theme = serde_json::to_value(&activation.config).unwrap_or_else(|_| json!({}));
+    let saved = store.update(json!({
+        "codexAppDreamSkinThemeConfig": theme,
+        "codexAppDreamSkinImagePath": activation.active_image_path
+    }));
+    let settings = match saved {
+        Ok(settings) => settings,
+        Err(error) => {
+            let _ = codex_plus_core::dream_skin::clear_managed_dream_skin_image(&state_dir);
+            if let Some(backup) = previous_backup {
+                let _ = restore_managed_dream_skin_image_backup(backup);
+            }
+            let _ = store.save(&previous);
+            return failed(
+                &format!("保存 Dream Skin 活动主题失败：{error}"),
+                failed_dream_skin_activation_payload(&previous, request.debug_port).await,
+            );
+        }
+    };
+
+    let should_apply = settings.enhancements_enabled
+        && settings.codex_app_dream_skin_enabled
+        && !settings.codex_app_dream_skin_paused;
+    let theme_changed = previous_runtime_signature
+        != codex_plus_core::assets::dream_skin_runtime_content_signature(&settings);
+    let (runtime, saved_for_next_launch, message) = if should_apply {
+        if let Err(error) = codex_plus_core::dream_skin::sync_default_dream_skin_base_theme(
+            true,
+            &settings.codex_app_dream_skin_theme_config,
+        ) {
+            (
+                codex_plus_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+                true,
+                format!("主题已保存，下次启动生效；同步基础主题失败：{error}"),
+            )
+        } else if theme_changed {
+            (
+                codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus::pending_restart(
+                    true, false,
+                ),
+                true,
+                "主题已保存；为避免不同主题样式残留，需要重启 Codex 后完整切换。".to_string(),
+            )
+        } else {
+            match codex_plus_core::dream_skin_runtime::apply_dream_skin_live(
+                request.debug_port,
+                request.helper_port,
+            )
+            .await
+            {
+                Ok(runtime) => (runtime, false, "Dream Skin 主题已应用。".to_string()),
+                Err(error) => (
+                    codex_plus_core::dream_skin_runtime::dream_skin_status(request.debug_port)
+                        .await,
+                    true,
+                    format!("主题已保存，下次启动生效；实时应用失败：{error}"),
+                ),
+            }
+        }
+    } else {
+        (
+            codex_plus_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+            true,
+            "主题已保存，下次启用或启动 Codex 时生效。".to_string(),
+        )
+    };
+    let library = current_dream_skin_library(&settings)
+        .unwrap_or_else(|_| empty_dream_skin_library(&settings));
+    ok(
+        &message,
+        DreamSkinThemeActivationPayload {
+            library,
+            runtime,
+            saved_for_next_launch,
+        },
+    )
+}
+
+#[tauri::command]
+pub async fn dream_skin_status(
+    request: DreamSkinRuntimeRequest,
+) -> CommandResult<codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus> {
+    ok(
+        "Dream Skin 状态已刷新。",
+        codex_plus_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+    )
+}
+
+#[tauri::command]
+pub async fn apply_dream_skin(
+    request: DreamSkinRuntimeRequest,
+) -> CommandResult<codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus> {
+    let store = SettingsStore::default();
+    let settings = match store.update(json!({ "codexAppDreamSkinPaused": false })) {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("更新 Dream Skin 状态失败：{error}"),
+                codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus::not_running(
+                    true, false,
+                ),
+            );
+        }
+    };
+    if !settings.enhancements_enabled || !settings.codex_app_dream_skin_enabled {
+        return failed(
+            "请先启用 Codex增强和 Dream Skin。",
+            codex_plus_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+        );
+    }
+    if let Err(error) = codex_plus_core::dream_skin::sync_default_dream_skin_base_theme(
+        true,
+        &settings.codex_app_dream_skin_theme_config,
+    ) {
+        return failed(
+            &format!("同步 Dream Skin 基础主题失败：{error}"),
+            codex_plus_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+        );
+    }
+    match codex_plus_core::dream_skin_runtime::apply_dream_skin_live(
+        request.debug_port,
+        request.helper_port,
+    )
+    .await
+    {
+        Ok(status) => ok("Dream Skin 已应用。", status),
+        Err(error) => failed(
+            &format!("实时应用失败，下次启动会继续应用：{error}"),
+            codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus::not_running(true, false),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn restore_dream_skin(
+    request: DreamSkinRuntimeRequest,
+) -> CommandResult<codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus> {
+    let store = SettingsStore::default();
+    if let Err(error) = codex_plus_core::dream_skin::sync_default_dream_skin_base_theme(
+        false,
+        &codex_plus_core::settings::DreamSkinThemeConfig::default(),
+    ) {
+        return failed(
+            &format!("恢复 Codex 原始外观失败：{error}"),
+            codex_plus_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+        );
+    }
+    if let Err(error) = store.update(json!({
+        "codexAppDreamSkinEnabled": false,
+        "codexAppDreamSkinPaused": false
+    })) {
+        return failed(
+            &format!("保存恢复状态失败：{error}"),
+            codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus::not_running(false, false),
+        );
+    }
+    let live = codex_plus_core::dream_skin_runtime::pause_dream_skin_live(request.debug_port).await;
+    let status =
+        codex_plus_core::dream_skin_runtime::DreamSkinRuntimeStatus::pending_restart(false, false);
+    match live {
+        Ok(()) => ok("外观配置已恢复，重启 Codex 后完整生效。", status),
+        Err(error) => ok(
+            &format!("外观配置已恢复，重启 Codex 后完整生效；当前无法清理实时皮肤：{error}"),
+            status,
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn reset_dream_skin_theme() -> CommandResult<SettingsPayload> {
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    let theme = serde_json::to_value(codex_plus_core::settings::DreamSkinThemeConfig::default())
+        .unwrap_or_else(|_| json!({}));
+    if let Err(error) = store.update(json!({
+        "codexAppDreamSkinThemeConfig": theme,
+        "codexAppDreamSkinImagePath": ""
+    })) {
+        return failed(
+            &format!("恢复默认 Dream Skin 主题失败：{error}"),
+            fallback_settings_payload(),
+        );
+    }
+    if let Err(error) = codex_plus_core::dream_skin::clear_managed_dream_skin_image(
+        &codex_plus_core::paths::default_app_state_dir(),
+    ) {
+        let previous_theme = serde_json::to_value(&previous.codex_app_dream_skin_theme_config)
+            .unwrap_or_else(|_| json!({}));
+        let _ = store.update(json!({
+            "codexAppDreamSkinThemeConfig": previous_theme,
+            "codexAppDreamSkinImagePath": previous.codex_app_dream_skin_image_path
+        }));
+        return failed(
+            &format!("清理自定义 Dream Skin 图片失败：{error}"),
+            fallback_settings_payload(),
+        );
+    }
+    settings_payload("已恢复目标项目默认主题。", "恢复后重新读取设置失败")
+}
+
+#[tauri::command]
+pub async fn verify_dream_skin(
+    request: DreamSkinRuntimeRequest,
+) -> CommandResult<codex_plus_core::dream_skin_runtime::DreamSkinVerification> {
+    let screenshot = request
+        .screenshot_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(Path::new);
+    match codex_plus_core::dream_skin_runtime::verify_dream_skin(request.debug_port, screenshot)
+        .await
+    {
+        Ok(result) if result.pass => ok("Dream Skin 实机验证通过。", result),
+        Ok(result) => failed("Dream Skin 实机验证未通过。", result),
+        Err(error) => failed(
+            &format!("Dream Skin 实机验证失败：{error}"),
+            codex_plus_core::dream_skin_runtime::DreamSkinVerification {
+                state: codex_plus_core::dream_skin_runtime::DreamSkinState::NotRunning,
+                pass: false,
+                version: None,
+                checks: Vec::new(),
+                screenshot_path: None,
+                raw: json!({}),
+            },
+        ),
+    }
+}
+
+fn dream_skin_market_payload(
+    load: codex_plus_core::dream_skin_market::DreamSkinMarketLoad,
+) -> DreamSkinMarketPayload {
+    DreamSkinMarketPayload {
+        schema_version: load.manifest.schema_version,
+        updated_at: load.manifest.updated_at,
+        repository_url: codex_plus_core::dream_skin_market::DEFAULT_MARKET_REPOSITORY_URL
+            .to_string(),
+        cached: load.cached,
+        warning: load.warning.unwrap_or_default(),
+        themes: load.manifest.themes,
+    }
+}
+
+fn empty_dream_skin_market_payload() -> DreamSkinMarketPayload {
+    DreamSkinMarketPayload {
+        schema_version: 1,
+        updated_at: String::new(),
+        repository_url: codex_plus_core::dream_skin_market::DEFAULT_MARKET_REPOSITORY_URL
+            .to_string(),
+        cached: false,
+        warning: String::new(),
+        themes: Vec::new(),
+    }
+}
+
+fn empty_dream_skin_community_payload() -> DreamSkinCommunityPayload {
+    DreamSkinCommunityPayload {
+        items: Vec::new(),
+        total: 0,
+        fetched_at: String::new(),
+        cached: false,
+        warning: String::new(),
+        installed_theme_id: String::new(),
+    }
+}
+
+fn default_dream_skin_helper_port() -> u16 {
+    codex_plus_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT
+}
+
+fn current_dream_skin_library(
+    settings: &BackendSettings,
+) -> anyhow::Result<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    codex_plus_core::dream_skin_library::list_dream_skin_themes(
+        &codex_plus_core::paths::default_app_state_dir(),
+        settings,
+    )
+}
+
+fn builtin_dream_skin_draft() -> codex_plus_core::dream_skin_library::DreamSkinThemeDraft {
+    codex_plus_core::dream_skin_library::DreamSkinThemeDraft {
+        config: codex_plus_core::settings::DreamSkinThemeConfig::default(),
+        image_path: String::new(),
+        builtin: true,
+    }
+}
+
+fn empty_dream_skin_library(
+    settings: &BackendSettings,
+) -> codex_plus_core::dream_skin_library::DreamSkinThemeLibrary {
+    codex_plus_core::dream_skin_library::DreamSkinThemeLibrary {
+        themes: Vec::new(),
+        active_draft: codex_plus_core::dream_skin_library::DreamSkinThemeDraft {
+            config: settings.codex_app_dream_skin_theme_config.clone(),
+            image_path: settings.codex_app_dream_skin_image_path.clone(),
+            builtin: false,
+        },
+    }
+}
+
+async fn failed_dream_skin_activation_payload(
+    settings: &BackendSettings,
+    debug_port: u16,
+) -> DreamSkinThemeActivationPayload {
+    DreamSkinThemeActivationPayload {
+        library: current_dream_skin_library(settings)
+            .unwrap_or_else(|_| empty_dream_skin_library(settings)),
+        runtime: codex_plus_core::dream_skin_runtime::dream_skin_status(debug_port).await,
+        saved_for_next_launch: false,
+    }
+}
+
+fn empty_dream_skin_image_payload() -> DreamSkinImagePayload {
+    DreamSkinImagePayload {
+        path: String::new(),
+        content_type: String::new(),
+        size_bytes: 0,
+    }
+}
+
+fn managed_dream_skin_image_backup(
+    path: &Path,
+    state_dir: &Path,
+) -> anyhow::Result<ManagedDreamSkinImageBackup> {
+    if !codex_plus_core::dream_skin::is_managed_dream_skin_image(path, state_dir) {
+        anyhow::bail!("Dream Skin image is not managed by Codex++");
+    }
+    Ok(ManagedDreamSkinImageBackup {
+        path: path.to_path_buf(),
+        bytes: fs::read(path)?,
+    })
+}
+
+fn restore_managed_dream_skin_image_backup(
+    backup: ManagedDreamSkinImageBackup,
+) -> anyhow::Result<()> {
+    codex_plus_core::settings::atomic_write(&backup.path, &backup.bytes)
+}
+
+fn dream_skin_content_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        Some("bmp") => "image/bmp",
+        _ => "application/octet-stream",
     }
 }
 
@@ -1531,6 +2468,79 @@ pub async fn import_session_url(url: String) -> CommandResult<SessionImportPaylo
         }
         Err(error) => failed(&format!("导入分享会话失败：{error}"), empty()),
     }
+}
+
+#[tauri::command]
+pub fn list_zed_remote_projects() -> CommandResult<ZedRemoteProjectsPayload> {
+    let result = codex_plus_core::zed_remote::list_zed_remote_projects_response(&json!({}));
+    if result.get("status").and_then(Value::as_str) == Some("ok") {
+        let projects = serde_json::from_value::<Vec<ZedRemoteProject>>(
+            result
+                .get("projects")
+                .cloned()
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+        )
+        .unwrap_or_default();
+        return ok(
+            &format!("已读取 {} 个 Zed 远程项目。", projects.len()),
+            ZedRemoteProjectsPayload { projects },
+        );
+    }
+    failed(
+        result
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("读取 Zed 远程项目失败。"),
+        ZedRemoteProjectsPayload {
+            projects: Vec::new(),
+        },
+    )
+}
+
+#[tauri::command]
+pub fn open_zed_remote(payload: Value) -> CommandResult<ZedRemoteOpenPayload> {
+    let result = codex_plus_core::zed_remote::open_zed_remote(&payload);
+    let strategy = result
+        .get("strategy")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<ZedOpenStrategy>(value).ok())
+        .unwrap_or_default();
+    let url = result
+        .get("url")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if result.get("status").and_then(Value::as_str) == Some("ok") {
+        return ok(
+            "已在 Zed Remote 打开项目。",
+            ZedRemoteOpenPayload { url, strategy },
+        );
+    }
+    failed(
+        result
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("无法在 Zed Remote 打开项目。"),
+        ZedRemoteOpenPayload { url, strategy },
+    )
+}
+
+#[tauri::command]
+pub fn forget_zed_remote_project(id: String) -> CommandResult<ZedRemoteProjectsPayload> {
+    let result =
+        codex_plus_core::zed_remote::forget_zed_remote_project_response(&json!({ "id": id }));
+    if result.get("status").and_then(Value::as_str) != Some("ok") {
+        return failed(
+            result
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("移除 Zed 远程项目失败。"),
+            ZedRemoteProjectsPayload {
+                projects: Vec::new(),
+            },
+        );
+    }
+    list_zed_remote_projects()
 }
 
 #[tauri::command]
@@ -2152,6 +3162,20 @@ fn persist_provider_sync_selection(provider: &str) {
 }
 
 #[tauri::command]
+pub async fn load_ads() -> CommandResult<AdsPayload> {
+    match codex_plus_core::ads::fetch_ad_list().await {
+        Ok(payload) => ok("推荐内容已加载。", ads_payload(payload)),
+        Err(error) => failed(
+            &format!("推荐内容加载失败：{error}"),
+            AdsPayload {
+                version: 1,
+                ads: Vec::new(),
+            },
+        ),
+    }
+}
+
+#[tauri::command]
 pub async fn refresh_script_market() -> CommandResult<ScriptMarketPayload> {
     match script_market::fetch_market_manifest(script_market::DEFAULT_MARKET_INDEX_URL).await {
         Ok(manifest) => ok(
@@ -2496,7 +3520,6 @@ fn skills_payload(
         repo_errors,
         skills_dir: manager.source_dir().to_string_lossy().to_string(),
         codex_skills_dir: manager.linked_dir().to_string_lossy().to_string(),
-        agents_skills_dir: manager.agents_linked_dir().to_string_lossy().to_string(),
     }
 }
 
@@ -2505,12 +3528,11 @@ fn current_skills_payload(manager: &codex_plus_core::skills::SkillsManager) -> S
 }
 
 fn default_skills_manager() -> codex_plus_core::skills::SkillsManager {
-    codex_plus_core::skills::SkillsManager::new_with_agents(
+    codex_plus_core::skills::SkillsManager::new(
         codex_plus_core::paths::default_skills_source_dir(),
         codex_plus_core::paths::default_skill_backups_dir(),
         codex_plus_core::paths::default_skills_state_path(),
         codex_plus_core::codex_home::default_codex_home_dir(),
-        codex_plus_core::paths::default_agents_home_dir(),
     )
 }
 
@@ -3337,65 +4359,6 @@ pub fn read_live_context_entries() -> CommandResult<LiveContextEntriesPayload> {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LiveConfigPayload {
-    pub config: codex_plus_core::live_config::LiveConfigSnapshot,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LiveConfigPreviewRequest {
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LiveConfigPreviewPayload {
-    pub preview: codex_plus_core::live_config::LiveConfigPreview,
-}
-
-#[tauri::command]
-pub fn read_live_config() -> CommandResult<LiveConfigPayload> {
-    let home = codex_plus_core::live_config::default_live_config_home();
-    match codex_plus_core::live_config::read_live_config(&home) {
-        Ok(config) => ok("live config.toml 已读取。", LiveConfigPayload { config }),
-        Err(error) => failed(
-            &format!("读取 live config.toml 失败：{error}"),
-            LiveConfigPayload {
-                config: codex_plus_core::live_config::LiveConfigSnapshot {
-                    path: home.join("config.toml").to_string_lossy().into_owned(),
-                    exists: false,
-                    text: String::new(),
-                    sha256: String::new(),
-                    parse_status: "error".to_string(),
-                    summary: Default::default(),
-                },
-            },
-        ),
-    }
-}
-
-#[tauri::command]
-pub fn preview_live_config(
-    request: LiveConfigPreviewRequest,
-) -> CommandResult<LiveConfigPreviewPayload> {
-    let preview = codex_plus_core::live_config::preview_live_config(&request.text);
-    let status = if preview.parse_status == "valid" { "ok" } else { "failed" };
-    CommandResult {
-        status: status.to_string(),
-        message: if status == "ok" {
-            "live config.toml 预览校验通过。".to_string()
-        } else {
-            preview
-                .error
-                .clone()
-                .unwrap_or_else(|| "live config.toml 解析失败。".to_string())
-        },
-        payload: LiveConfigPreviewPayload { preview },
-    }
-}
-
 #[tauri::command]
 pub fn upsert_context_entry(request: ContextEntryRequest) -> CommandResult<ContextEntriesPayload> {
     let mut settings = request.settings;
@@ -3727,6 +4690,65 @@ pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayPro
                 response_preview: String::new(),
             },
         ),
+    }
+}
+
+#[tauri::command]
+pub async fn test_stepwise_settings(
+    settings: BackendSettings,
+) -> CommandResult<StepwiseTestPayload> {
+    let configured_protocol = codex_plus_core::settings::normalize_stepwise_protocol(
+        &settings.codex_app_stepwise_protocol,
+    );
+    match codex_plus_core::stepwise::test_connection(&settings).await {
+        Ok(result) => {
+            let error = result
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let item_count = result
+                .get("items")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or_default();
+            let protocol = result
+                .get("protocol")
+                .and_then(Value::as_str)
+                .unwrap_or(&configured_protocol)
+                .to_string();
+            if error.is_empty() {
+                ok(
+                    &format!(
+                        "Stepwise 连接正常（{}），测试返回 {item_count} 条建议。",
+                        stepwise_protocol_label(&protocol)
+                    ),
+                    StepwiseTestPayload { item_count, error },
+                )
+            } else {
+                failed(
+                    &format!("Stepwise 测试失败：{error}"),
+                    StepwiseTestPayload { item_count, error },
+                )
+            }
+        }
+        Err(error) => failed(
+            &format!("Stepwise 测试失败：{error}"),
+            StepwiseTestPayload {
+                item_count: 0,
+                error: error.to_string(),
+            },
+        ),
+    }
+}
+
+fn stepwise_protocol_label(protocol: &str) -> &str {
+    match protocol {
+        "chat_completions" => "Chat Completions",
+        "responses" => "Responses",
+        "anthropic_messages" => "Anthropic Messages",
+        "auto" => "自动兼容",
+        _ => protocol,
     }
 }
 
@@ -4541,6 +5563,17 @@ fn read_optional_text_file(path: &std::path::Path) -> anyhow::Result<String> {
     }
 }
 
+fn ads_payload(payload: Value) -> AdsPayload {
+    AdsPayload {
+        version: payload.get("version").and_then(Value::as_u64).unwrap_or(1),
+        ads: payload
+            .get("ads")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+    }
+}
+
 fn open_url(url: &str) -> anyhow::Result<()> {
     #[cfg(windows)]
     {
@@ -4858,6 +5891,95 @@ fn shortcut_state(shortcut: install::ShortcutState) -> PathState {
             "missing".to_string()
         },
         path: shortcut.path,
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestVlmRequest {
+    pub api_key: String,
+    pub model: String,
+    pub base_url: String,
+    pub image_data_url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestVlmResult {
+    pub vlm_status: String,
+    pub http_code: Option<u16>,
+    pub duration_ms: u64,
+    pub error: Option<String>,
+    pub description: Option<String>,
+    pub model: String,
+    pub raw_request: Option<String>,
+    pub raw_response: Option<String>,
+}
+
+/// 用表单当前 VLM 配置 + 用户上传图片（data URL）测试 VLM 可用性。
+/// 用表单当前值（未保存亦可）；失败也返回结构化 payload 供前端渲染诊断。
+#[tauri::command]
+pub async fn test_vlm(request: TestVlmRequest) -> CommandResult<TestVlmResult> {
+    // 加固 spec §4.1 第二道门：前端校验可被绕过（IPC 直调），类型与大小在
+    // 信任边界重新校验；非法输入不发起网络请求。
+    if let Err(reason) = codex_plus_core::vision::validate_image_data_url(&request.image_data_url) {
+        return failed(
+            "VLM 测试失败：invalid_image",
+            TestVlmResult {
+                vlm_status: "invalid_image".to_string(),
+                http_code: None,
+                duration_ms: 0,
+                error: Some(reason),
+                description: None,
+                model: request.model,
+                raw_request: None,
+                raw_response: None,
+            },
+        );
+    }
+    let config = codex_plus_core::vision::VlmConfig {
+        api_key: request.api_key,
+        model: request.model.clone(),
+        base_url: request.base_url,
+    };
+    let client = match codex_plus_core::http_client::vlm_http_client() {
+        Ok(c) => c,
+        Err(e) => {
+            return failed(
+                &format!("VLM HTTP 客户端构建失败：{e}"),
+                TestVlmResult {
+                    vlm_status: "client_error".to_string(),
+                    http_code: None,
+                    duration_ms: 0,
+                    // 加固 spec §4.2：client_error 路径同样过脱敏，全仓库一条规则
+                    error: Some(codex_plus_core::vision::redact_secrets(
+                        &e.to_string(),
+                        &config.api_key,
+                    )),
+                    description: None,
+                    model: request.model,
+                    raw_request: None,
+                    raw_response: None,
+                },
+            );
+        }
+    };
+    let outcome =
+        codex_plus_core::vision::test_vlm_once(&config, &request.image_data_url, &client).await;
+    let result = TestVlmResult {
+        vlm_status: outcome.status.clone(),
+        http_code: outcome.http_code,
+        duration_ms: outcome.duration_ms,
+        error: outcome.error,
+        description: outcome.text,
+        model: request.model,
+        raw_request: outcome.raw_request,
+        raw_response: outcome.raw_response,
+    };
+    if outcome.status == "ok" {
+        ok("VLM 测试成功。", result)
+    } else {
+        failed(&format!("VLM 测试失败：{}", outcome.status), result)
     }
 }
 
@@ -5266,6 +6388,134 @@ mod tests {
         if result.payload.text.is_empty() {
             assert_eq!(result.status, "failed");
         }
+    }
+
+    #[test]
+    fn dream_skin_image_payload_does_not_expose_image_bytes() {
+        let payload = DreamSkinImagePayload {
+            path: "managed/current.png".to_string(),
+            content_type: "image/png".to_string(),
+            size_bytes: 42,
+        };
+
+        let value = serde_json::to_value(payload).unwrap();
+
+        assert!(value.get("bytes").is_none());
+        assert_eq!(value["contentType"], "image/png");
+        assert_eq!(value["sizeBytes"], 42);
+    }
+
+    #[test]
+    fn dream_skin_theme_library_payload_does_not_expose_image_bytes() {
+        let settings = BackendSettings::default();
+        let library = empty_dream_skin_library(&settings);
+
+        let encoded = serde_json::to_string(&library).unwrap();
+
+        assert!(!encoded.contains("\"bytes\""));
+        assert!(!encoded.contains("data:image"));
+        assert!(!encoded.contains("apiKey"));
+    }
+
+    #[test]
+    fn dream_skin_image_backup_restores_after_managed_files_are_cleared() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_dir = temp.path();
+        let image_path = state_dir.join("dream-skin/theme/current.png");
+        std::fs::create_dir_all(image_path.parent().unwrap()).unwrap();
+        std::fs::write(&image_path, b"old-image").unwrap();
+        let backup = managed_dream_skin_image_backup(&image_path, state_dir).unwrap();
+        codex_plus_core::dream_skin::clear_managed_dream_skin_image(state_dir).unwrap();
+
+        restore_managed_dream_skin_image_backup(backup).unwrap();
+
+        assert_eq!(std::fs::read(image_path).unwrap(), b"old-image");
+    }
+
+    #[test]
+    fn dream_skin_commands_are_registered_with_tauri() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs")).unwrap();
+
+        for command in [
+            "commands::dream_skin_status",
+            "commands::import_dream_skin_image",
+            "commands::reset_dream_skin_theme",
+            "commands::apply_dream_skin",
+            "commands::restore_dream_skin",
+            "commands::verify_dream_skin",
+            "commands::list_dream_skin_themes",
+            "commands::refresh_dream_skin_market",
+            "commands::install_dream_skin_market_theme",
+            "commands::load_dream_skin_theme",
+            "commands::create_dream_skin_theme",
+            "commands::save_dream_skin_theme",
+            "commands::rename_dream_skin_theme",
+            "commands::delete_dream_skin_theme",
+            "commands::activate_dream_skin_theme",
+        ] {
+            assert!(source.contains(command), "missing Tauri command {command}");
+        }
+    }
+
+    #[test]
+    fn dream_skin_tray_actions_reuse_core_lifecycle() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs")).unwrap();
+
+        for expected in [
+            "tray_apply_dream_skin",
+            "apply_dream_skin_live",
+            "sync_default_dream_skin_base_theme",
+        ] {
+            assert!(
+                source.contains(expected),
+                "missing tray lifecycle entry {expected}"
+            );
+        }
+        assert!(!source.contains("tray_pause_dream_skin"));
+        assert!(!source.contains("pause_dream_skin_from_tray"));
+        assert!(source.contains("!settings.codex_app_dream_skin_paused"));
+    }
+
+    #[test]
+    fn dream_skin_theme_reset_rollback_preserves_unknown_settings_fields() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands.rs"))
+                .unwrap();
+        let start = source.find("pub fn reset_dream_skin_theme").unwrap();
+        let end = source[start..]
+            .find("pub async fn verify_dream_skin")
+            .unwrap()
+            + start;
+        let reset_source = &source[start..end];
+
+        assert!(!reset_source.contains("store.save(&previous)"));
+        assert!(reset_source.contains("codexAppDreamSkinThemeConfig"));
+        assert!(reset_source.contains("codexAppDreamSkinImagePath"));
+    }
+
+    #[test]
+    fn dream_skin_theme_activation_rolls_back_image_and_settings_on_save_failure() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands.rs"))
+                .unwrap();
+        let start = source
+            .find("pub async fn activate_dream_skin_theme")
+            .unwrap();
+        let end = source[start..]
+            .find("pub async fn dream_skin_status")
+            .map(|offset| start + offset)
+            .unwrap();
+        let activation = &source[start..end];
+
+        assert!(activation.contains("previous_backup"));
+        assert!(activation.contains("clear_managed_dream_skin_image"));
+        assert!(activation.contains("restore_managed_dream_skin_image_backup"));
+        assert!(activation.contains("store.save(&previous)"));
+        assert!(activation.contains("previous_runtime_signature"));
+        assert!(activation.contains("theme_changed"));
+        assert!(activation.contains("pending_restart"));
     }
 
     #[test]
@@ -5982,6 +7232,7 @@ enabled = true
         );
     }
 
+    #[test]
     /// #1972：用户误把 Codex++ 自己的 exe 选成了「Codex 应用路径」——文件选择器
     /// 只按 exe 扩展名过滤，拦不住。以前无效路径会原样存进 settings.json，而
     /// launcher 拿到显式无效 --app-path 又不回退自动探测，于是启动永久失败，
@@ -6307,6 +7558,18 @@ model_reasoning_effort = "high"
                 .relay_context_config_contents
                 .contains("[mcp_servers.context7]")
         );
+    }
+
+    #[test]
+    fn ads_payload_keeps_version_and_ad_items() {
+        let payload = ads_payload(json!({
+            "version": 1,
+            "ads": [{"id": "ad-1", "type": "normal", "title": "Ad"}]
+        }));
+
+        assert_eq!(payload.version, 1);
+        assert_eq!(payload.ads.len(), 1);
+        assert_eq!(payload.ads[0]["id"], json!("ad-1"));
     }
 
     #[test]
