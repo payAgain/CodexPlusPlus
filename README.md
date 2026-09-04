@@ -1,4 +1,4 @@
-# Codex++（个人 fork）
+# Codex++
 
 <p align="center">
   <img src="docs/images/codex-plus-plus.png" alt="Codex++ 图标" width="160">
@@ -9,92 +9,176 @@
 </p>
 
 <p align="center">
-  <img alt="License" src="https://img.shields.io/github/license/payAgain/CodexPlusPlus">
+  <img alt="Release" src="https://img.shields.io/github/v/release/BigPizzaV3/CodexPlusPlus">
+  <img alt="Stars" src="https://img.shields.io/github/stars/BigPizzaV3/CodexPlusPlus">
+  <img alt="License" src="https://img.shields.io/github/license/BigPizzaV3/CodexPlusPlus">
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
   <img alt="Tauri" src="https://img.shields.io/badge/tauri-2.x-24C8DB">
 </p>
 
 Codex++ 是面向 OpenAI Codex / ChatGPT 桌面应用的外部启动器与管理工具。它通过 Chromium DevTools Protocol 和本地辅助服务提供供应商切换、协议转换、会话管理与界面增强，不修改官方应用的 `app.asar`，也不向安装目录写入补丁文件。
 
-本仓库是 [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 的个人 fork：按个人使用习惯精简上游功能（移除赞助商展示、Dream Skin 皮肤管理、Grok 配置、Zed Remote、Upstream worktree 与 stepwise 悬浮面板），补齐 Codex-X 界面与纯 API 增强，并按需摘取上游有价值的修复与新特性（见下方「上游同步记录」）。截至 2026-09-04，fork 相对分叉点净删约 4 万行。
+## 快速使用
 
-## 本 fork 改动
+从 [GitHub Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases) 下载最新版安装包：
 
-| 改动 | 说明 |
-| --- | --- |
-| 移除赞助商/推荐位 | 删除 `ads` 模块、前端赞助商板块、相关文案与图片资产 |
-| 移除 Dream Skin 皮肤管理 | 删除皮肤管理界面、皮肤运行时/社区/市场/安装包模块、内置与第三方皮肤资产，并清空 Tauri asset protocol 的皮肤目录权限 |
-| 移除 Grok 配置 | 删除 `grok_config` 模块与前端 Grok 管理界面 |
-| 移除 Zed Remote | 删除远程项目识别、打开与配套注入逻辑 |
-| 移除 Upstream worktree | 删除 worktree 创建、remote 管理与配套注入逻辑 |
-| 同步精简主链路 | 对应精简 `renderer-inject.js`、`styles.css`、Tauri commands/lib、launcher 与测试，其余功能不受影响 |
-| 移除 stepwise 悬浮面板 | 删除 stepwise 模块、悬浮面板注入资源与对应测试 |
-| Codex-X 界面 | 新增指令提示词页、实时 TOML 页与工作区状态栏，统一 Codex++ 命名 |
-| 纯 API 增强 | 默认 yolo 模式、剥离 ChatGPT 登录残留、通用配置启用 multi-agent v2 |
-| Skills 主目录 | 以 `~/.agents/skills` 为技能管理主根 |
-| 打包脚本 | 新增 `scripts/package-windows.ps1`，本地即可打包 Windows 安装器 |
+- Windows：`CodexPlusPlus-*-windows-x64-setup.exe`
+- macOS Intel：`CodexPlusPlus-*-macos-x64.dmg`
+- macOS Apple Silicon：`CodexPlusPlus-*-macos-arm64.dmg`
 
-## 分支与维护
+安装后会有两个入口：
 
-- `main`：只镜像上游 `main`，用于接收 [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 的同步更新，不合并个人改动。
-- `Codex/main`：个人维护主线，也是本仓库 GitHub 默认/展示分支。fork 全部改动集中在这里，采用「整合基线 + 逐个摘取上游提交」的方式跟踪上游，避免整支合并带回已裁剪的功能。
+- `Codex++`：静默启动官方桌面应用，并加载已保存的供应商配置与增强功能。
+- `Codex++ 管理工具`：管理供应商、模型、工具插件、会话、增强功能、脚本、更新和诊断。
 
-同步上游：
+首次使用建议先打开管理工具，确认应用路径和运行状态，再配置供应商与增强功能，最后从 `Codex++` 入口启动。Windows 安装包会创建桌面和开始菜单快捷方式；macOS DMG 会安装 `/Applications/Codex++.app` 和 `/Applications/Codex++ 管理工具.app`。
 
-```bash
-git remote add upstream https://github.com/BigPizzaV3/CodexPlusPlus.git
-git fetch upstream
-git checkout main
-git merge --ff-only upstream/main
-git checkout Codex/main
-# 对照「上游同步记录」继续摘取需要的提交
-git cherry-pick -x <upstream-commit>
-```
+## 赞助商
 
-## 上游同步记录
+<p align="center">
+  <a href="https://jojocode.com/">
+    <img src="docs/images/sponsor-jojocode.png" alt="JOJO Code" height="110">
+  </a>
+</p>
+<p align="center">
+  <a href="https://jojocode.com/"><strong>JOJO Code</strong></a><br>
+  JOJO Code 提供稳定、价格合理的 API 中转服务，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力，适合日常开发、团队协作和长期项目工作流。
+</p>
 
-每次整理完上游提交，在本节追加一条记录，写明摘取范围、跳过内容和下次继续的起点，避免重复筛选。
+<a href="mailto:1727532@qq.com">想显示在下方？</a>
+<p align="center">
+</p>
+<table>
+  <tr>
+    <th width="180">🏆 赞助商 🏆</th>
+    <th>介绍</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://jojocode.com/">
+        <img src="docs/images/sponsor-jojocode.png" alt="JOJO Code" height="80">
+      </a>
+    </td>
+    <td><a href="https://jojocode.com/"><strong>JOJO Code</strong></a><br>JOJO Code 提供稳定、价格合理且易于接入的 API 中转服务，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力，适合日常开发、快速配置、团队协作和长期使用。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://apikey.fun/register?aff=CODEX">
+        <img src="docs/images/sponsor-apikey-fun.png" alt="APIKEY.FUN" height="80">
+      </a>
+    </td>
+    <td><a href="https://apikey.fun/register?aff=CODEX"><strong>APIKEY.FUN</strong></a><br>感谢 APIKEY.FUN 赞助了本项目！APIKEY.FUN 是一家致力于提供开放、稳定、高性价比的全球主流大模型的 AI 中转站。平台支持 Claude、OpenAI、Gemini 等热门模型的 API 中转服务，价格低至官方原价的 7%。通过专属链接<a href="https://apikey.fun/register?aff=CODEX">注册 APIKEY</a>，可享受最高充值永久 95 折优惠。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://runapi.host/register?aff=AWJq">
+        <img src="docs/images/sponsor-runapi.png" alt="RunAPI" width="150">
+      </a>
+    </td>
+    <td><a href="https://runapi.host/register?aff=AWJq"><strong>RunAPI</strong></a><br>RunAPI 是高效稳定的 API OpenRouter 平替平台，一个 API Key 即可访问 OpenAI、Claude、Gemini、DeepSeek、Grok 等 150+ 主流模型，低至 1 折，极其稳定，可以无缝兼容 Claude Code、OpenClaw 等工具。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://www.quya.org/?promo=CODEX">
+        <img src="docs/images/sponsor-0029.svg" alt="quya.org 云桥" height="80">
+      </a>
+    </td>
+    <td><a href="https://www.quya.org/?promo=CODEX"><strong>quya.org 云桥｜一站式 AI 中转平台</strong></a><br>quya.org 云桥（原 0029.org）是一个集成 Claude Code、Codex 以及 Gemini 最新模型的一站式中转平台，为你提供稳定、高效且高性价比的 AI 中转服务。本站提供灵活的包月套餐/按量计费计划，国内直连，无需魔法，极速响应。支持个人和企业接入，价格最低为官方 0.12 折。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://app.everyapi.ai/signin?aff=imP7QQfaZm&amp;utm_source=referral&amp;utm_medium=codexplusplus">
+        <img src="docs/images/sponsor-everyapi.png" alt="EveryAPI" height="80">
+      </a>
+    </td>
+    <td><a href="https://app.everyapi.ai/signin?aff=imP7QQfaZm&amp;utm_source=referral&amp;utm_medium=codexplusplus"><strong>EveryAPI</strong></a><br>EveryAPI 自带桌面客户端，可为 Claude Code、Codex、Cursor 等 20 多款 AI 工具自动完成配置。一把密钥即可调用 Claude、GPT、DeepSeek、GLM、MiniMax、Kimi、豆包等模型，并支持自建节点直连和渠道供货。通过专属链接注册即送 14 元额度，首充额外赠送 20%；付款时使用优惠码 <code>codexplusplus</code> 再享长期 8 折。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://xc.y1yun.net/">
+        <img src="docs/images/sponsor-yiyun-tech.jpg" alt="屹芸科技" height="80">
+      </a>
+    </td>
+    <td><a href="https://xc.y1yun.net/"><strong>屹芸科技</strong></a><br>屹芸科技旗下拥有九五云商发卡网、屹芸付支付系统等面向 AI 聚合赛道的收付产品，支持微信、支付宝、银联、云闪付等通道，提供低费率、D1/D0 结算、7×24 小时技术支持和企微客户专属服务群。平台通道费率稳定、结算准时，并提供高强度网站防护，帮助商户稳定开展线上销售。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://dis.chatdesks.cn/chatdesk/hsyqCodexPlusPlus.html">
+        <img src="docs/images/sponsor-volcengine.png" alt="火山引擎" height="80">
+      </a>
+    </td>
+    <td><a href="https://dis.chatdesks.cn/chatdesk/hsyqCodexPlusPlus.html"><strong>火山引擎｜方舟 Agent Plan</strong></a><br>感谢火山引擎赞助本项目！方舟 Agent Plan 模型订阅套餐集成了 Doubao-Seed、Doubao-Seedance、Doubao-Seedream 等字节跳动自研 SOTA 级模型，覆盖文本、代码、图像、视频等多模态任务。最新支持 MiniMax-M3、DeepSeek-V4 系列、GLM-5.2、Doubao-Seed-2.0 系列、Kimi-K2.7 等模型，工具不限。超全模态模型与 Harness 升级一步到位，深度支持 Agent 框架与 AI 编程工具。一次订阅，可以为不同任务切换合适的 AI 引擎。方舟 Agent Plan 限时 2.5 折订阅，<a href="https://dis.chatdesks.cn/chatdesk/hsyqCodexPlusPlus.html">点击链接抢购</a>，名额有限，先到先得。<a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&amp;utm_content=CodexPlusPlus&amp;utm_medium=devrel_tool_web&amp;utm_source=OWO&amp;utm_term=CodexPlusPlus">For developers outside Mainland China, please click here</a>。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://ergouapi.com/r/gh-codexplusplus">
+        <img src="docs/images/sponsor-ergou-api.png" alt="二狗 API" height="80">
+      </a>
+    </td>
+    <td><a href="https://ergouapi.com/r/gh-codexplusplus"><strong>二狗 API</strong></a><br>二狗，稳如老狗的 AI API 中转站。全站 0.1x~0.2x 超低倍率，提供 Claude/GPT/Gemini 等多个国内外 100% 纯血大模型接口，顶级 IPLC 线路 + 住宅双 ISP 冗余，确保全国范围稳定低延迟访问。欢迎各位开发者、工作室注册使用。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://cn.hb-api.online/register?aff=8KA2ZKWNHND8">
+        <img src="docs/images/sponsor-baikewei-ai.jpg" alt="百可为AI" height="80">
+      </a>
+    </td>
+    <td><a href="https://cn.hb-api.online/register?aff=8KA2ZKWNHND8"><strong>百可为AI</strong></a><br>百可为AI 是面向开发者、团队和 AI 工具用户的一站式大模型 API 服务平台，支持 Claude、OpenAI、Gemini、Codex 等主流模型能力接入。平台提供稳定中转、灵活计费、用量统计、余额管理和多场景 API 调用能力，适合 Claude Code、Codex、AI 生图、自动化脚本和各类智能应用长期使用。新用户注册可领取免费额度，开发者可快速接入、即开即用，让 AI 能力更稳定、更高效、更省心。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://deepkey.top/register?aff=DNVc">
+        <img src="docs/images/sponsor-deepkey.png" alt="deepkey" height="90">
+      </a>
+    </td>
+    <td><a href="https://deepkey.top/register?aff=DNVc"><strong>deepkey｜API KEY</strong></a><br>感谢 deepkey 赞助本项目！deepkey 起初只是连接顶级算力的上游供应商，凭借稳定低价的接口被学生群体发现并口口相传。随着开发者与学子的涌入，这里不再只是 API 的搬运工，而是共同探讨提示词工程、分享创新应用的温暖社区。从工具到伙伴，deepkey 见证了无数灵感的诞生与落地。通过<a href="https://deepkey.top/register?aff=DNVc">此链接注册</a>进入群聊，可享受福利并与小伙伴们一起探讨。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://go.apimart.ai/gh-codexplusplus">
+        <img src="docs/images/sponsor-apimart.png" alt="API Mart" width="170">
+      </a>
+    </td>
+    <td><a href="https://go.apimart.ai/gh-codexplusplus"><strong>API Mart</strong></a><br>感谢 API Mart 赞助了本项目！API Mart 是专注 AI 图片和视频生成的低价 API 平台，GPT-Image-2 低至每张 0.006 美元，1 美元可生成 160 多张图片。图片、视频使用一套异步 API，提交任务获取 ID 后可通过轮询或回调取得结果；支持数万张批量任务，切换模型无需改代码。按量付费、无月费，通过<a href="https://go.apimart.ai/gh-codexplusplus">此链接注册</a>即可使用。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://api.fenno.ai/s/ZZM7">
+        <img src="docs/images/sponsor-fenno-ai.png" alt="FennoAI" width="170">
+      </a>
+    </td>
+    <td><a href="https://api.fenno.ai/s/ZZM7"><strong>FennoAI</strong></a><br>FennoAI 是一家稳定、高效的 API 中转服务商，目前主要提供 Codex 中转服务，兼容 OpenAI 及 Anthropic 协议，可灵活接入 Codex、Claude Code、OpenCode 等主流编程工具，稳定支撑千亿 Token/日的企业级调用需求，支持国内及海外主体公对公结算、开票。通过<a href="https://api.fenno.ai/s/ZZM7">专属链接</a>购买订阅，仅需 1.99 美元即可获得价值 50 美元的 Coding Plan 额度；邀请好友购买最高可获得 20% 返佣。</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://s.qiniu.com/7zUJri">
+        <img src="docs/images/sponsor-qiniu-ai.png" alt="七牛云" width="170">
+      </a>
+    </td>
+    <td><a href="https://s.qiniu.com/7zUJri"><strong>七牛云</strong></a><br>感谢七牛云 AI 赞助本项目！七牛云 AI 是七牛云（02567.HK）旗下企业级大模型 MaaS 平台，可一站式调用全球 150 多个主流模型，兼容全球主流模型厂商协议，覆盖文本、图像、音频、视频、文件处理等全模态能力，服务超过 169 万企业及开发者用户。企业用户可免费领取 1200 万 Token，邀请好友最高可获得百亿 Token。</td>
+  </tr>
+</table>
 
-### 2026-09-04（首次整理）
+## 交流与支持
 
-- 分叉基线：`d6b85e36`。此提交及之前的上游代码已全部包含在 `Codex/main` 中。
-- 本次摘取（保留 `Codex/main` 上的 `-x` 引用，可直接 `git log` 回溯）：
-  - `28ff56b` 切换供应商时保留 Hook 状态
-  - `cd1eba2` TOML 语义合并替代行级去重，修复 invalid transport
-  - `2950462` launcher 协议代理启动不变量
-  - `93686cd` 绝对上下文窗口同步进 catalog
-  - `5c521de` 无鉴权 profile 凭据保持为空
-  - `9580982` 无鉴权代理启动不变量
-  - `33cd20a` provider 同步生命周期守卫
-  - `f70ec61` PR #1944 整体重落地：按模型元数据导入、catalog 回滚、按模型自动压缩（已含 `99e9eed`、`7271d1e`）
-  - `77fc5de` 修复 Codex++ 页面下切换会话
-- 明确跳过（后续默认继续跳过，除非另有决定）：
-  - stepwise 悬浮面板系列（PR #2006 / #2008 / #2009 / #2018 / #2086），fork 已移除该功能
-  - VLM 测试入口系列（`534014f` 起）
-  - 皮肤、赞助相关改动
-- 下次继续：
+欢迎加入 Codex++ 交流 3 群（QQ群：619480492），反馈问题、交流使用体验或提出新功能建议。<a href="https://qm.qq.com/q/Erf1F1zwqs">点击链接加入群聊</a>。
 
-  ```bash
-  git fetch upstream
-  git log --oneline f70ec61..upstream/main
-  ```
+<img src="docs/images/discussion-group-qr.jpg" alt="Codex++ 微信群二维码" width="260">
 
-## 安装包
+Telegram 频道：<https://t.me/CodexPlusPlus>
 
-本 fork 不发布独立安装包。需要现成安装包时，可用 `scripts/package-windows.ps1` 本地打包 Windows 安装器，或使用[上游 Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases)。
+友情链接：<a href="https://linux.do">LINUX DO</a>
 
 ## 当前功能
 
 | 模块 | 功能 |
 | --- | --- |
 | 供应商配置 | 官方登录、官方登录混入 API、纯 API、聚合供应商；Responses / Chat Completions；模型测试、模型列表、Provider Doctor、cc-switch 与链接导入 |
-| 模型与上下文 | 每模型上下文窗口、每模型自动压缩阈值（默认 90%）、每模型元数据导入与 catalog 回滚、`model_catalog_json`、通用配置，以及按供应商选择 MCP、Skill 和 Plugin |
-| 会话管理 | 扫描本地会话、批量删除、Markdown 导出、Token 用量历史、Provider metadata 同步与备份、会话导入与分享链接 |
-| Skills 与脚本 | Skills 技能管理（主根 `~/.agents/skills`）、脚本市场安装/启停 |
-| 提示词与 TOML | 指令提示词页、实时 TOML 预览与编辑 |
-| Codex 增强 | 插件市场与模型白名单处理、粘贴修复、强制中文、快速启动、原生菜单汉化、会话宽度/滚动恢复/线程 ID、服务层级控制、Goals、图片覆盖层 |
-| 微信连接 | 通过个人微信连接本机 Codex 会话 |
-| 安装维护 | 应用检测、快捷方式、Watcher、环境冲突、日志诊断、健康检查和 Release 更新提示 |
+| 模型与上下文 | 每模型上下文窗口、自动压缩阈值、`model_catalog_json`、通用配置，以及按供应商选择 MCP、Skill 和 Plugin |
+| 会话管理 | 扫描本地会话、批量删除、Markdown 导出、Token 用量历史、Provider metadata 同步与备份 |
+| Codex 增强 | 插件市场与模型白名单、会话操作、粘贴修复、中文界面、快速启动、会话宽度与滚动恢复、服务层级控制、Goals、Stepwise、图片覆盖层 |
+| 开发工作流 | 项目移动、Upstream worktree、线程 ID、Zed Remote 项目识别与打开 |
+| 脚本与维护 | 用户脚本安装与启停、应用检测、快捷方式、Watcher、环境冲突、日志诊断、健康检查和 Release 更新 |
 
 所有界面增强都可以单独关闭。关闭“Codex 增强”总开关后，Codex++ 仍可作为供应商和启动管理工具使用。
 
@@ -105,26 +189,32 @@ Codex++ 将官方登录、混入 API 和纯 API 分开保存和切换：
 | 模式 | 用途 | 认证边界 |
 | --- | --- | --- |
 | 官方登录 | 只使用 ChatGPT / Codex 官方账号 | 清理自定义 provider 和 API Key，保留官方登录状态 |
-| 官方登录 + API | 保留官方账号与插件入口，模型请求走兼容 API | API Key 写入 provider bearer token，不写入纯 API 的 `auth.json` |
+| 官方登录 + API | 保留官方账号与插件入口，模型请求始终走兼容 API（不消耗官方额度，也不是官方优先回落） | API Key 写入 provider bearer token，不写入纯 API 的 `auth.json` |
 | 纯 API | 不依赖官方账号，完全使用自定义 Base URL / Key | 独立保存 `config.toml` 与 API Key，不混入官方认证 |
 | 聚合供应商 | 在多个普通 API 供应商之间路由 | 支持故障转移、按会话轮转、按请求轮转和权重轮转 |
 
 每个供应商可配置 Responses 或 Chat Completions 协议、模型列表、测试模型、User-Agent、上下文窗口、自动压缩阈值，以及该供应商启用的 MCP Server、Skill 和 Plugin。Chat Completions 可通过本地代理转换为 Codex 使用的 Responses 协议。
 
-每模型窗口支持 `1M`、`200K` 或纯数字；每模型自动压缩阈值接受 `90`、`84.5%` 这类写法，留空时按 Codex++ 默认 90% 落盘。Codex++ 会生成独立 `model_catalog_json`（支持元数据导入与回滚），让 Codex 按当前模型使用对应窗口与压缩行为。
+每模型窗口支持 `1M`、`200K` 或纯数字。Codex++ 会生成独立 `model_catalog_json`，让 Codex 按当前模型使用对应窗口。
 
 切换供应商时会先保存当前配置，再写入目标配置。真实 API Key 只保存在本机，请勿放入日志、截图或 issue。
 
 ## Codex 界面增强
 
-- 插件市场解锁与模型白名单处理。
-- 会话删除、批量删除和 Markdown 导出。
-- 富文本粘贴转纯文本、强制中文、快速启动和原生菜单汉化。
-- 会话宽度、滚动位置恢复、线程 ID 和服务层级切换。
-- Goals 按供应商开关，可写回 config.toml。
-- 图片覆盖层。
+- 会话删除、批量删除、Markdown 导出和项目移动。
+- 插件市场解锁、插件自动展开和模型白名单处理。
+- 富文本粘贴转纯文本、强制中文、启动加速和原生菜单本地化。
+- 会话宽度、滚动位置恢复、线程 ID、服务层级切换和 Goals。
+- Stepwise 下一步建议，可单独配置 API、模型、建议数量与超时。
+- Upstream worktree、Zed Remote、自定义图片覆盖层和用户脚本。
 
 依赖注入脚本的设置通常需要保存后重新启动 Codex++ 才会生效。
+
+## 自动更新与安装包
+
+Codex++ 通过 GitHub Release 发布安装包。Windows 会生成 NSIS 安装程序，macOS 会生成 Intel x64 和 Apple Silicon arm64 两个 DMG。
+
+管理工具的“关于”页可以检查并启动更新。静默启动器发现新版本时会拉起管理工具并进入更新提示。
 
 ## 数据位置
 
@@ -133,6 +223,49 @@ Codex++ 将官方登录、混入 API 和纯 API 分开保存和切换：
 - Codex 本地数据库：优先读取 `~/.codex/sqlite/*.db`，旧版回退到 `~/.codex/state_5.sqlite`
 - Codex++ 状态与日志：`~/.codex-session-delete/`
 - Provider 同步备份：`~/.codex/backups_state/provider-sync`
+
+## 常见问题
+
+### Codex++ 菜单没出现
+
+确认从 `Codex++` 入口启动，而不是直接打开官方应用。然后在管理工具的“安装维护”和“关于”页面检查应用路径、启动状态与诊断日志。
+
+### 切换供应商后请求失败
+
+先在供应商详情中运行模型测试或 Provider Doctor，并确认协议、Base URL、Key 和测试模型匹配。纯 API 与官方混入模式使用不同的认证位置，不要手工复制两种模式的 `auth.json`。
+
+### 混入 API Key 模式是“官方优先、额度不足时 API 补偿”吗
+
+不是。官方登录 + API（混入）模式下，模型请求**始终走你配置的兼容 API**，官方账号只保留登录状态和插件入口，不会先消耗官方额度再回落到 API。需要“一个供应商失败时切到另一个”的行为时，使用聚合供应商：它支持故障转移、按会话轮转、按请求轮转和权重轮转。两种模式的认证保存位置不同，配置前先在供应商详情里用模型测试确认目标 API 可用。
+
+### Upstream worktree 和 Codex 原生创建有什么区别
+
+Codex++ 的 Upstream worktree 功能等价于先更新远端分支，再执行：
+
+```bash
+git worktree add -b <new-branch> <worktree-path> upstream/<base-branch>
+```
+
+这样新 worktree 从最新的远端跟踪分支开始，而不是从当前会话所在的本地 HEAD 开始。如果 Codex++ 无法安全识别当前 Codex 版本的原生 worktree 创建表单，请从 Codex++ 菜单中手动填写仓库路径、分支名、worktree 路径、remote 和 base branch。
+
+### macOS 提示无法打开或已损坏
+
+当前安装包未签名/未公证时，macOS Gatekeeper 可能拦截，出现“已损坏，无法打开”的提示：
+
+![macOS 提示 Codex++ 管理工具已损坏](docs/images/macos-damaged-warning.png)
+
+如果遇到该提示，可以在终端执行下面两条命令，解除苹果系统的安全隔离限制：
+
+```bash
+sudo xattr -rd com.apple.quarantine /Applications/Codex++\ 管理工具.app
+sudo xattr -rd com.apple.quarantine /Applications/Codex++.app
+```
+
+执行后重新打开 `Codex++` 或 `Codex++ 管理工具` 即可。
+
+### macOS Intel 能用吗
+
+可以。Release 会分别提供 `macos-x64.dmg` 和 `macos-arm64.dmg`。Intel Mac 下载 x64 包，Apple Silicon 下载 arm64 包。
 
 ## 开发
 
@@ -164,12 +297,13 @@ crates/
 scripts/installer/
   windows/CodexPlusPlus.nsi     Windows NSIS 安装包
   macos/package-dmg.sh          macOS DMG 打包
-scripts/package-windows.ps1     Windows setup 打包脚本
 ```
 
 ## 开源协议
 
-上游项目 Copyright (C) 2026 BigPizzaV3。本 fork 继续沿用 [GNU Affero General Public License v3.0](LICENSE)，SPDX 标识为 `AGPL-3.0-only`。修改并分发本项目，或通过网络提供修改后的版本时，需要按 AGPLv3 提供对应源代码。
+Copyright (C) 2026 BigPizzaV3
+
+CodexPlusPlus 采用 [GNU Affero General Public License v3.0](LICENSE)，SPDX 标识为 `AGPL-3.0-only`。修改并分发本项目，或通过网络提供修改后的版本时，需要按 AGPLv3 提供对应源代码。
 
 许可证只覆盖 CodexPlusPlus 自身代码，不授予 OpenAI、ChatGPT、Codex 的商标、应用资源或其他第三方内容的权利。
 
