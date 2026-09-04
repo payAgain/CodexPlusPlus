@@ -103,7 +103,6 @@ pub struct CodexContextEntry {
 #[serde(rename_all = "camelCase")]
 pub struct CodexContextEntries {
     pub mcp_servers: Vec<CodexContextEntry>,
-    pub skills: Vec<CodexContextEntry>,
     pub plugins: Vec<CodexContextEntry>,
 }
 
@@ -1064,7 +1063,6 @@ pub fn list_context_entries_from_common_config(
     let doc = parse_toml_document(&normalized)?;
     Ok(CodexContextEntries {
         mcp_servers: list_context_entries_for_table(&doc, "mcp_servers"),
-        skills: list_context_entries_for_table(&doc, "skills"),
         plugins: list_context_entries_for_table(&doc, "plugins"),
     })
 }
@@ -1185,7 +1183,7 @@ fn preserve_unmanaged_live_context_entries(
 }
 
 fn merge_managed_context_tables(target: &mut toml_edit::Table, managed: &toml_edit::Table) {
-    for table_name in ["mcp_servers", "skills", "plugins"] {
+    for table_name in CONTEXT_TABLE_NAMES {
         merge_managed_context_table(target, managed, table_name);
     }
 }
@@ -1214,7 +1212,7 @@ fn merge_managed_context_table(
 }
 
 fn remove_managed_context_entries(target: &mut toml_edit::Table, managed: &toml_edit::Table) {
-    for table_name in ["mcp_servers", "skills", "plugins"] {
+    for table_name in CONTEXT_TABLE_NAMES {
         remove_managed_context_entry_table(target, managed, table_name);
     }
 }
@@ -1243,7 +1241,7 @@ fn preserve_unmanaged_context_tables(
     live: &toml_edit::Table,
     managed: &toml_edit::Table,
 ) {
-    for table_name in ["mcp_servers", "skills", "plugins"] {
+    for table_name in CONTEXT_TABLE_NAMES {
         preserve_unmanaged_context_table(target, live, managed, table_name);
     }
 }
@@ -1284,7 +1282,7 @@ fn preserve_unmanaged_context_table(
 }
 
 fn remove_disabled_context_tables(table: &mut toml_edit::Table) {
-    for table_name in ["mcp_servers", "skills", "plugins"] {
+    for table_name in CONTEXT_TABLE_NAMES {
         let Some(item) = table.get_mut(table_name) else {
             continue;
         };
@@ -3118,7 +3116,10 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
     // 这里过去还要求 auth_contents 为空，于是「非空但不含 OPENAI_API_KEY」的 auth.json
     // （例如退出 ChatGPT 登录后残留的 tokens/last_refresh）会把写入挡掉，
     // key 两边都没有，Codex CLI 只能回退到 OPENAI_API_KEY 环境变量，上游返回 401（issue #1965）。
+    // no-auth profile 不注入 key：这里一旦走过 set_openai_api_key_in_auth_contents，
+    // 残留 tokens 会被清空，而 no-auth 恰恰依赖 tokens 维持 Codex 的启动不变量。
     if profile.relay_mode == crate::settings::RelayMode::PureApi
+        && !profile.uses_no_auth()
         && !source_api_key.trim().is_empty()
     {
         profile.auth_contents =

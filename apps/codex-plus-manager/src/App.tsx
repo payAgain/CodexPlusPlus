@@ -107,6 +107,7 @@ import {
   type ImageHandling,
   type ModelWindowRow,
 } from "./model-windows";
+import { normalizeAutoCompactEditing, normalizeAutoCompactPercent } from "./auto-compact";
 import { relayAuthForLiveDraft, shouldBackfillRelayProfileBeforeSwitch } from "./relay-live-files";
 import { resolveProviderName } from "./provider-name";
 import { resolveProviderSyncCompletion } from "./provider-sync-flow";
@@ -251,6 +252,8 @@ export type RelayProfile = {
   autoCompactLimit: string;
   modelList: string;
   modelWindows: string;
+  modelAutoCompact: string;
+  modelMetadata: string;
   modelVlm: string;
   vlmApiKey: string;
   vlmModel: string;
@@ -942,6 +945,8 @@ const defaultSettings: BackendSettings = {
       autoCompactLimit: "",
       modelList: "",
       modelWindows: "",
+      modelAutoCompact: "",
+      modelMetadata: "",
       modelVlm: "",
       vlmApiKey: "",
       vlmModel: "",
@@ -5431,7 +5436,7 @@ function RelayProfileDetail({
 }) {
   const [draft, setDraft] = useState<RelayProfile>(profile);
   const [modelWindowRows, setModelWindowRows] = useState<ModelWindowRow[]>(
-    modelWindowRowsFromProfile(profile.modelList, profile.modelWindows || "", profile.modelVlm),
+    modelWindowRowsFromProfile(profile.modelList, profile.modelWindows || "", profile.modelVlm, profile.modelAutoCompact),
   );
   const [doctorResult, setDoctorResult] = useState<ProviderDoctorResult | null>(null);
   const [doctorOpen, setDoctorOpen] = useState(false);
@@ -5459,8 +5464,8 @@ function RelayProfileDetail({
       ? applyRelayProfilePatchToFiles(liveDraft, { apiKey: storedApiKey })
       : liveDraft;
     setDraft(nextDraft);
-    setModelWindowRows(modelWindowRowsFromProfile(nextDraft.modelList, nextDraft.modelWindows || "", nextDraft.modelVlm));
-  }, [profile.id, profile.modelList, profile.modelWindows, profileUsesLiveFiles, isActive, isNew, relayFiles?.configContents, relayFiles?.authContents]);
+    setModelWindowRows(modelWindowRowsFromProfile(nextDraft.modelList, nextDraft.modelWindows || "", nextDraft.modelVlm, nextDraft.modelAutoCompact));
+  }, [profile.id, profile.modelList, profile.modelWindows, profile.modelAutoCompact, profileUsesLiveFiles, isActive, isNew, relayFiles?.configContents, relayFiles?.authContents]);
   const validationSettings = relaySettingsWithDraft(form, profile.id, draft, isNew);
   const validationError = relaySessionProviderValidation(draft)
     ?? (isAggregateRelayProfile(draft)
@@ -5468,7 +5473,7 @@ function RelayProfileDetail({
       : relayModelRoutesSettingsValidation(validationSettings));
   const draftWithModelRows = () => {
     const serializedRows = serializeModelWindowRows(modelWindowRows);
-    return { ...draft, modelList: serializedRows.modelList, modelWindows: serializedRows.modelWindows, modelVlm: serializedRows.modelVlm };
+    return { ...draft, modelList: serializedRows.modelList, modelWindows: serializedRows.modelWindows, modelAutoCompact: serializedRows.modelAutoCompact, modelVlm: serializedRows.modelVlm };
   };
   const saveDraft = async () => {
     if (validationError) return;
@@ -5841,7 +5846,7 @@ function RelayProfileEditor({
   };
   const removeModelWindowRow = (index: number) => {
     const nextRows = modelWindowRows.filter((_, rowIndex) => rowIndex !== index);
-    setModelWindowRows(nextRows.length ? nextRows : [{ model: "", window: "", imageHandling: "" }]);
+    setModelWindowRows(nextRows.length ? nextRows : [{ model: "", window: "", imageHandling: "", autoCompact: "" }]);
   };
   const addModelWindowRows = (rows: ModelWindowRow[]) => {
     setModelWindowRows(mergeModelWindowRows(modelWindowRows, rows));
@@ -6001,6 +6006,7 @@ function RelayProfileEditor({
               ...profile,
               modelList: serializedRows.modelList,
               modelWindows: serializedRows.modelWindows,
+              modelAutoCompact: serializedRows.modelAutoCompact,
             });
           }}
           value={profile.model}
@@ -6017,7 +6023,7 @@ function RelayProfileEditor({
             </div>
             <div className="relay-model-list-tools">
               <Button
-                onClick={() => setModelWindowRows([...modelWindowRows, { model: "", window: "", imageHandling: "" }])}
+                onClick={() => setModelWindowRows([...modelWindowRows, { model: "", window: "", imageHandling: "", autoCompact: "" }])}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -6032,9 +6038,10 @@ function RelayProfileEditor({
                     ...profile,
                     modelList: serializedRows.modelList,
                     modelWindows: serializedRows.modelWindows,
+                    modelAutoCompact: serializedRows.modelAutoCompact,
                   });
                   if (models?.length) {
-                    addModelWindowRows(models.map((model) => ({ model, window: "", imageHandling: "" })));
+                    addModelWindowRows(models.map((model) => ({ model, window: "", imageHandling: "", autoCompact: "" })));
                   }
                 }}
                 size="sm"
@@ -6046,7 +6053,7 @@ function RelayProfileEditor({
               </Button>
               <Button
                 disabled={!modelWindowRows.some((row) => row.model.trim())}
-                onClick={() => setModelWindowRows([{ model: "", window: "", imageHandling: "send-as-is" }])}
+                onClick={() => setModelWindowRows([{ model: "", window: "", imageHandling: "send-as-is", autoCompact: "" }])}
                 size="sm"
                 title={t("清空模型")}
                 type="button"
@@ -6061,6 +6068,7 @@ function RelayProfileEditor({
             <div className="relay-model-row relay-model-row-head">
               <span>{t("模型名称")}</span>
               <span>{t("上下文窗口")}</span>
+              <span>{t("自动压缩")}</span>
               <span>{t("图片处理方式")}</span>
             </div>
             {modelWindowRows.map((row, index) => (
@@ -6074,6 +6082,20 @@ function RelayProfileEditor({
                   value={row.window}
                   onChange={(event) => updateModelWindowRow(index, { window: event.currentTarget.value })}
                   placeholder="1M"
+                />
+                <Input
+                  value={row.autoCompact}
+                  onChange={(event) => {
+                    updateModelWindowRow(index, {
+                      autoCompact: normalizeAutoCompactEditing(event.currentTarget.value, row.autoCompact),
+                    });
+                  }}
+                  onBlur={() => {
+                    if (!row.autoCompact.trim()) return;
+                    updateModelWindowRow(index, { autoCompact: normalizeAutoCompactPercent(row.autoCompact) });
+                  }}
+                  placeholder="90%"
+                  title={t("留空保存为默认 90%；模型上下文用到该比例时触发自动压缩。")}
                 />
                 <AppSelect
                   className="text-xs"
@@ -8713,6 +8735,8 @@ function normalizeSettings(settings: BackendSettings): BackendSettings {
             autoCompactLimit: "",
             modelList: "",
             modelWindows: "",
+            modelAutoCompact: "",
+            modelMetadata: "",
             modelVlm: "",
             vlmApiKey: "",
             vlmModel: "",
@@ -8791,6 +8815,8 @@ function normalizeRelayProfile(profile: RelayProfile): RelayProfile {
         autoCompactLimit: "",
         modelList: "",
         modelWindows: "",
+        modelAutoCompact: "",
+        modelMetadata: "",
         modelRoutes: [],
         sub2apiEnabled: false,
         sub2apiMultiplier: "",
@@ -9652,6 +9678,8 @@ function createRelayProfile(settings: BackendSettings): RelayProfile {
     autoCompactLimit: "",
     modelList: "",
     modelWindows: "",
+    modelAutoCompact: "",
+    modelMetadata: "",
     modelVlm: "",
     vlmApiKey: "",
     vlmModel: "",
@@ -9689,6 +9717,8 @@ function createAggregateRelayProfile(settings: BackendSettings): RelayProfile {
       autoCompactLimit: "",
       modelList: "",
       modelWindows: "",
+      modelAutoCompact: "",
+      modelMetadata: "",
       modelVlm: "",
       vlmApiKey: "",
       vlmModel: "",

@@ -2481,9 +2481,10 @@
   }
 
   function codexRemoteSessionProviderRequestMethod(method) {
+    // app-server restores persisted model/provider/reasoning for thread/resume only
+    // when the caller supplies none of those overrides.
     return [
       "thread/start",
-      "thread/resume",
       "start-conversation",
       "start-thread-for-host",
       "thread-prewarm-start",
@@ -2499,8 +2500,7 @@
     if (!params || typeof params !== "object" || Array.isArray(params)) return params;
     const profile = codexRemoteSessionActiveProfile();
     const pureApi = String(profile?.relayMode || "") === "pureApi";
-    const isExtendedPureApiRequest = requestMethod === "thread/resume" || requestMethod === "turn/start";
-    if (isExtendedPureApiRequest && !pureApi) return params;
+    if (requestMethod === "turn/start" && !pureApi) return params;
     const hasModelProvider = Object.prototype.hasOwnProperty.call(params, "modelProvider")
       || Object.prototype.hasOwnProperty.call(params, "model_provider");
     if (requestMethod === "turn/start" && !hasModelProvider) return params;

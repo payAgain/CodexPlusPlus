@@ -1694,12 +1694,14 @@ fn injection_script_applies_fast_service_tier_contract() {
     assert_eq!(cases["openAiNormalizationDisabled"], true);
     assert_eq!(cases["refreshedCustomProviderOverride"], "refreshed_vendor");
     assert_eq!(cases["refreshedOpenAiProvider"], "openai");
-    assert_eq!(cases["refreshedPureApiResumeProvider"], "custom");
+    assert_eq!(cases["refreshedPureApiResumeProvider"], "openai");
+    assert_eq!(cases["refreshedPureApiResumeModel"], "gpt-5.6-terra");
     assert_eq!(cases["failedRefreshProviderUnchanged"], "openai");
     assert_eq!(cases["missingActiveProviderUnchanged"], true);
     assert_eq!(cases["missingActiveRecoveryUnscheduled"], true);
     assert_eq!(cases["pureApiThreadStartProvider"], "custom");
-    assert_eq!(cases["pureApiThreadResumeProvider"], "custom");
+    assert_eq!(cases["pureApiThreadResumeUnchanged"], true);
+    assert_eq!(cases["pureApiNativeResumeUnchanged"], true);
     assert_eq!(cases["pureApiTurnStartProvider"], "custom");
     assert_eq!(cases["pureApiTurnWithoutProviderUnchanged"], true);
     assert_eq!(cases["pureApiOtherProviderUnchanged"], true);
@@ -2266,8 +2268,10 @@ window.__codexSessionDeleteBridge = async (path) => {{
 await appServerClient.sendRequest("thread/resume", {{
   threadId: "thread-mobile-pure-api-refresh",
   modelProvider: "openai",
+  model: "gpt-5.6-terra",
 }}, {{ signal: "pure-api-switch" }});
 const refreshedPureApiResumeProvider = appServerCalls.at(-1)?.params?.modelProvider || "";
+const refreshedPureApiResumeModel = appServerCalls.at(-1)?.params?.model || "";
 delete window.__codexSessionDeleteBridge;
 api.setBackendSettings({{
   relayProfilesEnabled: true,
@@ -2301,10 +2305,13 @@ api.setBackendSettings({{
 }});
 const pureApiParams = {{ cwd: "C:/mobile", modelProvider: "openai" }};
 const pureApiThreadStartProvider = api.applyProviderOverride("thread/start", pureApiParams)?.modelProvider;
-const pureApiThreadResumeProvider = api.applyProviderOverride("thread/resume", {{
+const pureApiThreadResumeParams = {{
   threadId: "thread-mobile-pure-api",
   model_provider: "openai",
-}})?.modelProvider;
+}};
+const pureApiThreadResumeUnchanged = api.applyProviderOverride("thread/resume", pureApiThreadResumeParams) === pureApiThreadResumeParams;
+const pureApiNativeResumeParams = {{ threadId: "thread-mobile-native-resume" }};
+const pureApiNativeResumeUnchanged = api.applyProviderOverride("thread/resume", pureApiNativeResumeParams) === pureApiNativeResumeParams;
 const pureApiTurnStartProvider = api.applyProviderOverride("turn/start", {{
   threadId: "thread-mobile-pure-api",
   modelProvider: "openai",
@@ -2451,11 +2458,13 @@ process.stdout.write(JSON.stringify({{
   refreshedCustomProviderOverride,
   refreshedOpenAiProvider,
   refreshedPureApiResumeProvider,
+  refreshedPureApiResumeModel,
   failedRefreshProviderUnchanged,
   missingActiveProviderUnchanged,
   missingActiveRecoveryUnscheduled,
   pureApiThreadStartProvider,
-  pureApiThreadResumeProvider,
+  pureApiThreadResumeUnchanged,
+  pureApiNativeResumeUnchanged,
   pureApiTurnStartProvider,
   pureApiTurnWithoutProviderUnchanged,
   pureApiOtherProviderUnchanged,
