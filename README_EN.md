@@ -16,7 +16,7 @@
 
 Codex++ is an external launcher and manager for the OpenAI Codex / ChatGPT desktop app. It uses the Chromium DevTools Protocol and a local helper for provider switching, protocol conversion, session management, and UI enhancements without modifying the official app's `app.asar` or installation files.
 
-This repository is a personal fork of [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus). It trims the upstream feature set to match personal usage: sponsor surfaces, Dream Skin management, Grok configuration, Zed Remote, and Upstream worktree have been removed, while the core provider, model context, session, enhancement, and script capabilities remain. The fork changes cover about 80 files with roughly 29,000 lines removed.
+This repository is a personal fork of [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus). It trims the upstream feature set to match personal usage (sponsor surfaces, Dream Skin management, Grok configuration, Zed Remote, Upstream worktree, and the stepwise floating panel are removed), adds Codex-X UI pages and pure-API enhancements, and cherry-picks valuable upstream fixes and features on demand (see the "Upstream Sync Log" below). As of 2026-09-04 the fork removes roughly 40,000 lines relative to the fork point.
 
 ## Fork Changes
 
@@ -28,11 +28,16 @@ This repository is a personal fork of [BigPizzaV3/CodexPlusPlus](https://github.
 | Removed Zed Remote | Removed remote project discovery, opening, and related injection logic |
 | Removed Upstream worktree | Removed worktree creation, remote management, and related injection logic |
 | Simplified shared paths | Trimmed `renderer-inject.js`, `styles.css`, Tauri commands/lib, launcher, and tests without affecting remaining features |
+| Removed stepwise floating panel | Removed the stepwise module, floating-panel injection assets, and related tests |
+| Codex-X UI | Added the prompts page, live TOML page, workspace status bar, and unified Codex++ naming |
+| Pure API enhancements | Default yolo mode, stripped ChatGPT login residue, and multi-agent v2 enabled in shared config |
+| Primary skills root | `~/.agents/skills` is the primary skills management root |
+| Packaging script | Added `scripts/package-windows.ps1` to build the Windows installer locally |
 
 ## Branches and Maintenance
 
 - `main`: mirrors upstream `main` and only receives synchronization updates from [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus). Personal changes are never merged here.
-- `codex/remove-extra-features`: the personal maintenance branch and the GitHub default branch for this repository. All fork changes live here.
+- `Codex/main`: the personal maintenance branch and the GitHub default branch for this repository. All fork changes live here. Upstream is tracked via a consolidated baseline plus selective cherry-picks, so trimmed features never come back through full merges.
 
 Sync with upstream:
 
@@ -41,22 +46,52 @@ git remote add upstream https://github.com/BigPizzaV3/CodexPlusPlus.git
 git fetch upstream
 git checkout main
 git merge --ff-only upstream/main
-git checkout codex/remove-extra-features
-git rebase main
+git checkout Codex/main
+# Pick the commits you need, guided by the "Upstream Sync Log" section
+git cherry-pick -x <upstream-commit>
 ```
+
+## Upstream Sync Log
+
+Every time upstream commits are triaged, append a record here describing what was picked, what was skipped, and where to resume next time.
+
+### 2026-09-04 (first pass)
+
+- Fork baseline: `d6b85e36`. Everything up to and including this upstream commit is already contained in `Codex/main`.
+- Picked this round (the `-x` references live on `Codex/main`, so `git log` can trace them):
+  - `28ff56b` preserve hook state across providers
+  - `cd1eba2` semantic TOML merge, fixes invalid transport
+  - `2950462` launcher protocol proxy startup invariants
+  - `93686cd` sync absolute context limits into catalogs
+  - `5c521de` keep no-auth profile credentials empty
+  - `9580982` preserve no-auth proxy startup invariant
+  - `33cd20a` recoverable provider sync lifecycle guard
+  - `f70ec61` PR #1944 re-land: per-model metadata import, catalog rollback, per-model auto-compact (includes `99e9eed`, `7271d1e`)
+  - `77fc5de` fix session switching on the Codex++ page
+- Intentionally skipped (keep skipping unless decided otherwise):
+  - stepwise floating panel series (PR #2006 / #2008 / #2009 / #2018 / #2086); the feature was removed here
+  - VLM test entry series (starting at `534014f`)
+  - skin and sponsor related changes
+- Resume next time:
+
+  ```bash
+  git fetch upstream
+  git log --oneline f70ec61..upstream/main
+  ```
 
 ## Installers
 
-This fork does not publish standalone installers. Use the [upstream Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases) or build locally as described in the Development section.
+This fork does not publish standalone installers. Build the Windows installer locally with `scripts/package-windows.ps1`, or use the [upstream Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases).
 
 ## Current Features
 
 | Area | Capabilities |
 | --- | --- |
 | Provider configuration | Official login, official login plus API, pure API, and aggregate providers; Responses / Chat Completions; model tests, model discovery, Provider Doctor, cc-switch and deep-link imports |
-| Models and context | Per-model context windows, auto-compact limits, `model_catalog_json`, shared config, and per-provider MCP, Skill, and Plugin selection |
+| Models and context | Per-model context windows, per-model auto-compact thresholds (90% default), per-model metadata import with catalog rollback, `model_catalog_json`, shared config, and per-provider MCP, Skill, and Plugin selection |
 | Session management | Local session scanning, bulk deletion, Markdown export, token usage history, provider metadata sync and backups, session import and share links |
-| Skills and scripts | Skills management and script marketplace installation/toggles |
+| Skills and scripts | Skills management (primary root `~/.agents/skills`) and script marketplace installation/toggles |
+| Prompts and TOML | Prompt catalog page, live TOML preview and editing |
 | Codex enhancements | Plugin marketplace and model whitelist handling, paste fix, forced Chinese locale, fast startup, native menu localization, conversation width/scroll restore/thread IDs, service-tier controls, Goals, and image overlay |
 | WeChat connection | Connect local Codex sessions through personal WeChat |
 | Maintenance | App detection, shortcuts, Watcher, environment cleanup, logs, diagnostics, health checks, and Release update notifications |
@@ -76,7 +111,7 @@ Official login, mixed API, and pure API are stored and switched separately:
 
 Each provider can configure Responses or Chat Completions, model lists, a test model, User-Agent, context windows, auto-compact limits, and enabled MCP servers, Skills, and Plugins. Chat Completions can be converted locally into the Responses protocol used by Codex.
 
-Per-model windows accept values such as `1M`, `200K`, or plain integers. Codex++ generates a dedicated `model_catalog_json` for Codex.
+Per-model windows accept values such as `1M`, `200K`, or plain integers; per-model auto-compact thresholds accept `90` or `84.5%` style values and fall back to the Codex++ default of 90% when left empty. Codex++ generates a dedicated `model_catalog_json` (with metadata import and rollback) so Codex applies the right window and compact behavior per model.
 
 Provider switching saves the current profile before applying the target profile. Real API keys remain local and should never be posted in logs, screenshots, or issues.
 
@@ -129,6 +164,7 @@ crates/
 scripts/installer/
   windows/CodexPlusPlus.nsi     Windows NSIS installer
   macos/package-dmg.sh          macOS DMG packaging
+scripts/package-windows.ps1     Windows setup packaging script
 ```
 
 ## License
