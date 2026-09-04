@@ -7,8 +7,6 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use toml_edit::{DocumentMut, Item};
 
-use crate::zed_remote::ZedOpenStrategy;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LaunchMode {
@@ -233,127 +231,6 @@ pub enum RelayMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DreamSkinColors {
-    pub background: String,
-    pub panel: String,
-    pub panel_alt: String,
-    pub accent: String,
-    pub accent_alt: String,
-    pub secondary: String,
-    pub highlight: String,
-    pub text: String,
-    pub muted: String,
-    pub line: String,
-}
-
-impl Default for DreamSkinColors {
-    fn default() -> Self {
-        Self {
-            background: "#F7F4F5".to_string(),
-            panel: "#FFFFFF".to_string(),
-            panel_alt: "#FFF7F8".to_string(),
-            accent: "#E25563".to_string(),
-            accent_alt: "#F07A86".to_string(),
-            secondary: "#F3A8AF".to_string(),
-            highlight: "#C93D4C".to_string(),
-            text: "#2B2224".to_string(),
-            muted: "#8A7A7D".to_string(),
-            line: "rgba(196, 120, 128, .22)".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DreamSkinThemeConfig {
-    #[serde(default = "default_dream_skin_schema_version")]
-    pub schema_version: u8,
-    #[serde(default = "default_dream_skin_id")]
-    pub id: String,
-    #[serde(default = "default_dream_skin_name")]
-    pub name: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub style_preset: String,
-    #[serde(default = "default_dream_skin_brand_subtitle")]
-    pub brand_subtitle: String,
-    #[serde(default = "default_dream_skin_tagline")]
-    pub tagline: String,
-    #[serde(default = "default_dream_skin_project_prefix")]
-    pub project_prefix: String,
-    #[serde(default = "default_dream_skin_project_label")]
-    pub project_label: String,
-    #[serde(default = "default_dream_skin_status_text")]
-    pub status_text: String,
-    #[serde(default = "default_dream_skin_quote")]
-    pub quote: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub colors: Option<DreamSkinColors>,
-    #[serde(flatten)]
-    pub extra_fields: Map<String, Value>,
-}
-
-impl Default for DreamSkinThemeConfig {
-    fn default() -> Self {
-        let mut extra_fields = Map::new();
-        #[cfg(windows)]
-        {
-            extra_fields.insert(
-                "image".to_string(),
-                Value::String("dream-reference.jpg".to_string()),
-            );
-            extra_fields.insert("appearance".to_string(), Value::String("auto".to_string()));
-            extra_fields.insert(
-                "art".to_string(),
-                serde_json::json!({
-                    "focusX": 0.72,
-                    "focusY": 0.45,
-                    "safeArea": "left",
-                    "taskMode": "ambient"
-                }),
-            );
-        }
-        #[cfg(not(windows))]
-        {
-            extra_fields.insert(
-                "image".to_string(),
-                Value::String("portal-hero.png".to_string()),
-            );
-            extra_fields.insert(
-                "promoTitle".to_string(),
-                Value::String("感谢 Passion8 赞助".to_string()),
-            );
-            extra_fields.insert(
-                "promoSub".to_string(),
-                Value::String("passion8.cc".to_string()),
-            );
-            extra_fields.insert(
-                "promoUrl".to_string(),
-                Value::String("https://passion8.cc/register?aff=TuPe".to_string()),
-            );
-        }
-        Self {
-            schema_version: default_dream_skin_schema_version(),
-            id: default_dream_skin_id(),
-            name: default_dream_skin_name(),
-            style_preset: String::new(),
-            brand_subtitle: default_dream_skin_brand_subtitle(),
-            tagline: default_dream_skin_tagline(),
-            project_prefix: default_dream_skin_project_prefix(),
-            project_label: default_dream_skin_project_label(),
-            status_text: default_dream_skin_status_text(),
-            quote: default_dream_skin_quote(),
-            colors: if cfg!(windows) {
-                None
-            } else {
-                Some(DreamSkinColors::default())
-            },
-            extra_fields,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BackendSettings {
     #[serde(rename = "codexAppPath", default)]
     pub codex_app_path: String,
@@ -393,16 +270,6 @@ pub struct BackendSettings {
     pub codex_app_conversation_view: bool,
     #[serde(rename = "codexAppThreadScrollRestore", default = "default_true")]
     pub codex_app_thread_scroll_restore: bool,
-    #[serde(rename = "codexAppZedRemoteOpen", default = "default_true")]
-    pub codex_app_zed_remote_open: bool,
-    #[serde(rename = "zedRemoteOpenStrategy", default)]
-    pub zed_remote_open_strategy: ZedOpenStrategy,
-    #[serde(rename = "zedRemoteProjectRegistryEnabled", default = "default_true")]
-    pub zed_remote_project_registry_enabled: bool,
-    #[serde(rename = "zedRemoteSyncToZedSettings", default)]
-    pub zed_remote_sync_to_zed_settings: bool,
-    #[serde(rename = "codexAppUpstreamWorktreeCreate", default = "default_true")]
-    pub codex_app_upstream_worktree_create: bool,
     #[serde(rename = "codexAppNativeMenuPlacement", default = "default_true")]
     pub codex_app_native_menu_placement: bool,
     #[serde(rename = "codexAppNativeMenuLocalization", default = "default_true")]
@@ -411,52 +278,6 @@ pub struct BackendSettings {
     pub codex_app_service_tier_controls: bool,
     #[serde(rename = "codexAppPetRealMouseLook", default)]
     pub codex_app_pet_real_mouse_look: bool,
-    #[serde(rename = "codexAppStepwiseEnabled", default)]
-    pub codex_app_stepwise_enabled: bool,
-    #[serde(rename = "codexAppStepwiseDirectSend", default)]
-    pub codex_app_stepwise_direct_send: bool,
-    #[serde(rename = "codexAppStepwiseBaseUrl", default)]
-    pub codex_app_stepwise_base_url: String,
-    #[serde(rename = "codexAppStepwiseApiKey", default)]
-    pub codex_app_stepwise_api_key: String,
-    #[serde(
-        rename = "codexAppStepwiseApiKeyEnv",
-        default = "default_stepwise_api_key_env",
-        deserialize_with = "empty_as_default_stepwise_api_key_env"
-    )]
-    pub codex_app_stepwise_api_key_env: String,
-    #[serde(
-        rename = "codexAppStepwiseProtocol",
-        default = "default_stepwise_protocol",
-        deserialize_with = "deserialize_stepwise_protocol"
-    )]
-    pub codex_app_stepwise_protocol: String,
-    #[serde(rename = "codexAppStepwiseModel", default)]
-    pub codex_app_stepwise_model: String,
-    #[serde(
-        rename = "codexAppStepwiseMaxItems",
-        default = "default_stepwise_max_items",
-        deserialize_with = "deserialize_stepwise_max_items"
-    )]
-    pub codex_app_stepwise_max_items: u8,
-    #[serde(
-        rename = "codexAppStepwiseMaxInputChars",
-        default = "default_stepwise_max_input_chars",
-        deserialize_with = "deserialize_stepwise_max_input_chars"
-    )]
-    pub codex_app_stepwise_max_input_chars: u32,
-    #[serde(
-        rename = "codexAppStepwiseMaxOutputTokens",
-        default = "default_stepwise_max_output_tokens",
-        deserialize_with = "deserialize_stepwise_max_output_tokens"
-    )]
-    pub codex_app_stepwise_max_output_tokens: u32,
-    #[serde(
-        rename = "codexAppStepwiseTimeoutMs",
-        default = "default_stepwise_timeout_ms",
-        deserialize_with = "deserialize_stepwise_timeout_ms"
-    )]
-    pub codex_app_stepwise_timeout_ms: u64,
     #[serde(rename = "codexAppImageOverlayEnabled", default)]
     pub codex_app_image_overlay_enabled: bool,
     #[serde(rename = "codexAppImageOverlayPath", default)]
@@ -473,20 +294,6 @@ pub struct BackendSettings {
         deserialize_with = "deserialize_image_overlay_fit_mode"
     )]
     pub codex_app_image_overlay_fit_mode: String,
-    #[serde(rename = "codexAppDreamSkinEnabled", default)]
-    pub codex_app_dream_skin_enabled: bool,
-    #[serde(rename = "codexAppDreamSkinPaused", default)]
-    pub codex_app_dream_skin_paused: bool,
-    #[serde(
-        rename = "codexAppDreamSkinTheme",
-        default = "default_dream_skin_theme",
-        deserialize_with = "deserialize_dream_skin_theme"
-    )]
-    pub codex_app_dream_skin_theme: String,
-    #[serde(rename = "codexAppDreamSkinThemeConfig", default)]
-    pub codex_app_dream_skin_theme_config: DreamSkinThemeConfig,
-    #[serde(rename = "codexAppDreamSkinImagePath", default)]
-    pub codex_app_dream_skin_image_path: String,
     #[serde(rename = "codexGoalsEnabled", default)]
     pub codex_goals_enabled: bool,
     #[serde(rename = "weixinConnectEnabled", default)]
@@ -559,35 +366,14 @@ impl Default for BackendSettings {
             codex_app_thread_id_badge: false,
             codex_app_conversation_view: false,
             codex_app_thread_scroll_restore: true,
-            codex_app_zed_remote_open: true,
-            zed_remote_open_strategy: ZedOpenStrategy::AddToFocusedWorkspace,
-            zed_remote_project_registry_enabled: true,
-            zed_remote_sync_to_zed_settings: false,
-            codex_app_upstream_worktree_create: true,
             codex_app_native_menu_placement: true,
             codex_app_native_menu_localization: true,
             codex_app_service_tier_controls: false,
             codex_app_pet_real_mouse_look: false,
-            codex_app_stepwise_enabled: false,
-            codex_app_stepwise_direct_send: false,
-            codex_app_stepwise_base_url: String::new(),
-            codex_app_stepwise_api_key: String::new(),
-            codex_app_stepwise_api_key_env: default_stepwise_api_key_env(),
-            codex_app_stepwise_protocol: default_stepwise_protocol(),
-            codex_app_stepwise_model: String::new(),
-            codex_app_stepwise_max_items: default_stepwise_max_items(),
-            codex_app_stepwise_max_input_chars: default_stepwise_max_input_chars(),
-            codex_app_stepwise_max_output_tokens: default_stepwise_max_output_tokens(),
-            codex_app_stepwise_timeout_ms: default_stepwise_timeout_ms(),
             codex_app_image_overlay_enabled: false,
             codex_app_image_overlay_path: String::new(),
             codex_app_image_overlay_opacity: default_image_overlay_opacity(),
             codex_app_image_overlay_fit_mode: default_image_overlay_fit_mode(),
-            codex_app_dream_skin_enabled: false,
-            codex_app_dream_skin_paused: false,
-            codex_app_dream_skin_theme: default_dream_skin_theme(),
-            codex_app_dream_skin_theme_config: DreamSkinThemeConfig::default(),
-            codex_app_dream_skin_image_path: String::new(),
             codex_goals_enabled: false,
             weixin_connect_enabled: false,
             weixin_connect_base_url: default_weixin_connect_base_url(),
@@ -768,39 +554,6 @@ impl BackendSettings {
     }
 }
 
-pub fn default_stepwise_api_key_env() -> String {
-    "CODEX_STEPWISE_API_KEY".to_string()
-}
-
-pub fn default_stepwise_protocol() -> String {
-    "chat_completions".to_string()
-}
-
-pub fn normalize_stepwise_protocol(value: &str) -> String {
-    match value.trim() {
-        "chat_completions" | "responses" | "anthropic_messages" | "auto" => {
-            value.trim().to_string()
-        }
-        _ => default_stepwise_protocol(),
-    }
-}
-
-pub fn default_stepwise_max_items() -> u8 {
-    6
-}
-
-pub fn default_stepwise_max_input_chars() -> u32 {
-    6000
-}
-
-pub fn default_stepwise_max_output_tokens() -> u32 {
-    500
-}
-
-pub fn default_stepwise_timeout_ms() -> u64 {
-    8000
-}
-
 fn default_image_overlay_opacity() -> u8 {
     35
 }
@@ -818,125 +571,6 @@ fn normalize_image_overlay_fit_mode(value: &str) -> String {
         "fill" | "fit" | "stretch" | "tile" | "center" => value.to_string(),
         _ => default_image_overlay_fit_mode(),
     }
-}
-
-pub fn default_dream_skin_theme() -> String {
-    "pink".to_string()
-}
-
-fn default_dream_skin_schema_version() -> u8 {
-    1
-}
-
-#[cfg(windows)]
-fn default_dream_skin_id() -> String {
-    "preset-arina-hashimoto".to_string()
-}
-
-#[cfg(not(windows))]
-fn default_dream_skin_id() -> String {
-    "custom-1784123441349".to_string()
-}
-
-#[cfg(windows)]
-fn default_dream_skin_name() -> String {
-    "桥本有菜".to_string()
-}
-
-#[cfg(not(windows))]
-fn default_dream_skin_name() -> String {
-    "Dream Skin".to_string()
-}
-
-pub fn resolve_dream_skin_style_preset(id: &str, style_preset: &str) -> String {
-    let style_preset = style_preset.trim();
-    if !style_preset.is_empty() && style_preset != "dream-original" {
-        return style_preset.to_string();
-    }
-
-    match id.trim() {
-        "caishen-lite" => "caishen-lite",
-        "caishen-max" => "caishen-max",
-        "caishen-readable" => "caishen-readable",
-        "export-night" => "export-night",
-        "global-founder-bright" => "global-founder-bright",
-        "mythic-guardian-noir" => "mythic-guardian-noir",
-        "codex-snow-skin" => "codex-snow",
-        "glass-vision" => "glass-vision",
-        "preset-midnight-aurora" => "midnight-aurora",
-        "preset-amber-dusk" => "amber-dusk",
-        "preset-forest-mist" => "forest-mist",
-        "preset-cyber-neon" => "cyber-neon",
-        "preset-sakura-dawn" => "sakura-dawn",
-        _ => "dream-original",
-    }
-    .to_string()
-}
-
-fn default_dream_skin_brand_subtitle() -> String {
-    "CODEX DREAM SKIN".to_string()
-}
-
-#[cfg(windows)]
-fn default_dream_skin_tagline() -> String {
-    "把柔光与玫瑰带进今天的工作台。".to_string()
-}
-
-#[cfg(not(windows))]
-fn default_dream_skin_tagline() -> String {
-    "把喜欢的画面变成可交互的 Codex 工作台。".to_string()
-}
-
-fn default_dream_skin_project_prefix() -> String {
-    "选择项目 · ".to_string()
-}
-
-fn default_dream_skin_project_label() -> String {
-    "◉  选择项目".to_string()
-}
-
-#[cfg(windows)]
-fn default_dream_skin_status_text() -> String {
-    "DREAM SKIN ONLINE".to_string()
-}
-
-#[cfg(not(windows))]
-fn default_dream_skin_status_text() -> String {
-    "THEME ONLINE".to_string()
-}
-
-#[cfg(windows)]
-fn default_dream_skin_quote() -> String {
-    "MAKE SOMETHING WONDERFUL".to_string()
-}
-
-#[cfg(not(windows))]
-fn default_dream_skin_quote() -> String {
-    "Make something wonderful".to_string()
-}
-
-fn normalize_dream_skin_theme(value: &str) -> String {
-    match value.trim() {
-        "pink" | "luckyGod" | "redWhite" | "clearGlass" | "inspiration" | "purpleNight"
-        | "miku" | "blackGold" => value.trim().to_string(),
-        _ => default_dream_skin_theme(),
-    }
-}
-
-pub fn clamp_stepwise_max_items(value: u8) -> u8 {
-    value.min(default_stepwise_max_items())
-}
-
-pub fn clamp_stepwise_max_input_chars(value: u32) -> u32 {
-    value.clamp(1000, 24000)
-}
-
-pub fn clamp_stepwise_max_output_tokens(value: u32) -> u32 {
-    value.clamp(100, 4000)
-}
-
-pub fn clamp_stepwise_timeout_ms(value: u64) -> u64 {
-    value.clamp(1000, 60000)
 }
 
 pub fn default_true() -> bool {
@@ -971,25 +605,6 @@ pub fn default_aggregate_member_weight() -> u32 {
     1
 }
 
-pub fn empty_as_default_stepwise_api_key_env<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<String>::deserialize(deserializer)?;
-    Ok(value
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(default_stepwise_api_key_env))
-}
-
-fn deserialize_stepwise_protocol<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<String>::deserialize(deserializer)?
-        .map(|value| normalize_stepwise_protocol(&value))
-        .unwrap_or_else(default_stepwise_protocol))
-}
-
 fn deserialize_image_overlay_opacity<'de, D>(deserializer: D) -> Result<u8, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1006,51 +621,6 @@ where
     Ok(Option::<String>::deserialize(deserializer)?
         .map(|value| normalize_image_overlay_fit_mode(&value))
         .unwrap_or_else(default_image_overlay_fit_mode))
-}
-
-fn deserialize_dream_skin_theme<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<String>::deserialize(deserializer)?
-        .map(|value| normalize_dream_skin_theme(&value))
-        .unwrap_or_else(default_dream_skin_theme))
-}
-
-fn deserialize_stepwise_max_items<'de, D>(deserializer: D) -> Result<u8, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<u8>::deserialize(deserializer)?
-        .map(clamp_stepwise_max_items)
-        .unwrap_or_else(default_stepwise_max_items))
-}
-
-fn deserialize_stepwise_max_input_chars<'de, D>(deserializer: D) -> Result<u32, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<u32>::deserialize(deserializer)?
-        .map(clamp_stepwise_max_input_chars)
-        .unwrap_or_else(default_stepwise_max_input_chars))
-}
-
-fn deserialize_stepwise_max_output_tokens<'de, D>(deserializer: D) -> Result<u32, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<u32>::deserialize(deserializer)?
-        .map(clamp_stepwise_max_output_tokens)
-        .unwrap_or_else(default_stepwise_max_output_tokens))
-}
-
-fn deserialize_stepwise_timeout_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<u64>::deserialize(deserializer)?
-        .map(clamp_stepwise_timeout_ms)
-        .unwrap_or_else(default_stepwise_timeout_ms))
 }
 
 fn deserialize_profile_api_key<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -1197,107 +767,10 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppThreadIdBadge");
     merge_bool_setting(target, source, "codexAppConversationView");
     merge_bool_setting(target, source, "codexAppThreadScrollRestore");
-    merge_bool_setting(target, source, "codexAppZedRemoteOpen");
-    if let Some(value) = source.get("zedRemoteOpenStrategy") {
-        if serde_json::from_value::<ZedOpenStrategy>(value.clone()).is_ok() {
-            target.insert("zedRemoteOpenStrategy".to_string(), value.clone());
-        }
-    }
-    merge_bool_setting(target, source, "zedRemoteProjectRegistryEnabled");
-    merge_bool_setting(target, source, "zedRemoteSyncToZedSettings");
-    merge_bool_setting(target, source, "codexAppUpstreamWorktreeCreate");
     merge_bool_setting(target, source, "codexAppNativeMenuPlacement");
     merge_bool_setting(target, source, "codexAppNativeMenuLocalization");
     merge_bool_setting(target, source, "codexAppServiceTierControls");
     merge_bool_setting(target, source, "codexAppPetRealMouseLook");
-    merge_bool_setting(target, source, "codexAppStepwiseEnabled");
-    merge_bool_setting(target, source, "codexAppStepwiseDirectSend");
-    if let Some(value) = source
-        .get("codexAppStepwiseBaseUrl")
-        .and_then(Value::as_str)
-    {
-        target.insert(
-            "codexAppStepwiseBaseUrl".to_string(),
-            Value::String(value.trim().trim_end_matches('/').to_string()),
-        );
-    }
-    if let Some(value) = source.get("codexAppStepwiseApiKey").and_then(Value::as_str) {
-        target.insert(
-            "codexAppStepwiseApiKey".to_string(),
-            Value::String(value.trim().to_string()),
-        );
-    }
-    if let Some(value) = source
-        .get("codexAppStepwiseApiKeyEnv")
-        .and_then(Value::as_str)
-    {
-        target.insert(
-            "codexAppStepwiseApiKeyEnv".to_string(),
-            Value::String(if value.trim().is_empty() {
-                default_stepwise_api_key_env()
-            } else {
-                value.trim().to_string()
-            }),
-        );
-    }
-    if let Some(value) = source
-        .get("codexAppStepwiseProtocol")
-        .and_then(Value::as_str)
-    {
-        target.insert(
-            "codexAppStepwiseProtocol".to_string(),
-            Value::String(normalize_stepwise_protocol(value)),
-        );
-    }
-    if let Some(value) = source.get("codexAppStepwiseModel").and_then(Value::as_str) {
-        target.insert(
-            "codexAppStepwiseModel".to_string(),
-            Value::String(value.trim().to_string()),
-        );
-    }
-    if let Some(value) = source
-        .get("codexAppStepwiseMaxItems")
-        .and_then(Value::as_u64)
-        .and_then(|value| u8::try_from(value).ok())
-    {
-        target.insert(
-            "codexAppStepwiseMaxItems".to_string(),
-            Value::Number(serde_json::Number::from(clamp_stepwise_max_items(value))),
-        );
-    }
-    if let Some(value) = source
-        .get("codexAppStepwiseMaxInputChars")
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-    {
-        target.insert(
-            "codexAppStepwiseMaxInputChars".to_string(),
-            Value::Number(serde_json::Number::from(clamp_stepwise_max_input_chars(
-                value,
-            ))),
-        );
-    }
-    if let Some(value) = source
-        .get("codexAppStepwiseMaxOutputTokens")
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-    {
-        target.insert(
-            "codexAppStepwiseMaxOutputTokens".to_string(),
-            Value::Number(serde_json::Number::from(clamp_stepwise_max_output_tokens(
-                value,
-            ))),
-        );
-    }
-    if let Some(value) = source
-        .get("codexAppStepwiseTimeoutMs")
-        .and_then(Value::as_u64)
-    {
-        target.insert(
-            "codexAppStepwiseTimeoutMs".to_string(),
-            Value::Number(serde_json::Number::from(clamp_stepwise_timeout_ms(value))),
-        );
-    }
     merge_bool_setting(target, source, "codexAppImageOverlayEnabled");
     if let Some(value) = source
         .get("codexAppImageOverlayPath")
@@ -1325,28 +798,6 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
         target.insert(
             "codexAppImageOverlayFitMode".to_string(),
             Value::String(normalize_image_overlay_fit_mode(value)),
-        );
-    }
-    merge_bool_setting(target, source, "codexAppDreamSkinEnabled");
-    merge_bool_setting(target, source, "codexAppDreamSkinPaused");
-    if let Some(value) = source.get("codexAppDreamSkinTheme").and_then(Value::as_str) {
-        target.insert(
-            "codexAppDreamSkinTheme".to_string(),
-            Value::String(normalize_dream_skin_theme(value)),
-        );
-    }
-    if let Some(value) = source.get("codexAppDreamSkinThemeConfig")
-        && serde_json::from_value::<DreamSkinThemeConfig>(value.clone()).is_ok()
-    {
-        target.insert("codexAppDreamSkinThemeConfig".to_string(), value.clone());
-    }
-    if let Some(value) = source
-        .get("codexAppDreamSkinImagePath")
-        .and_then(Value::as_str)
-    {
-        target.insert(
-            "codexAppDreamSkinImagePath".to_string(),
-            Value::String(value.trim().to_string()),
         );
     }
     if let Some(value) = source.get("codexGoalsEnabled").and_then(Value::as_bool) {
@@ -1572,30 +1023,6 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
         clamp_image_overlay_opacity(settings.codex_app_image_overlay_opacity);
     settings.codex_app_image_overlay_fit_mode =
         normalize_image_overlay_fit_mode(&settings.codex_app_image_overlay_fit_mode);
-    settings.codex_app_dream_skin_theme =
-        normalize_dream_skin_theme(&settings.codex_app_dream_skin_theme);
-    if settings.codex_app_dream_skin_theme_config == DreamSkinThemeConfig::default()
-        && settings.codex_app_dream_skin_theme != default_dream_skin_theme()
-    {
-        settings.codex_app_dream_skin_theme_config.id = settings.codex_app_dream_skin_theme.clone();
-    }
-    settings.codex_app_dream_skin_image_path =
-        settings.codex_app_dream_skin_image_path.trim().to_string();
-    settings.codex_app_stepwise_base_url = settings
-        .codex_app_stepwise_base_url
-        .trim()
-        .trim_end_matches('/')
-        .to_string();
-    settings.codex_app_stepwise_api_key = settings.codex_app_stepwise_api_key.trim().to_string();
-    settings.codex_app_stepwise_api_key_env =
-        if settings.codex_app_stepwise_api_key_env.trim().is_empty() {
-            default_stepwise_api_key_env()
-        } else {
-            settings.codex_app_stepwise_api_key_env.trim().to_string()
-        };
-    settings.codex_app_stepwise_protocol =
-        normalize_stepwise_protocol(&settings.codex_app_stepwise_protocol);
-    settings.codex_app_stepwise_model = settings.codex_app_stepwise_model.trim().to_string();
     settings.weixin_connect_base_url = settings
         .weixin_connect_base_url
         .trim()
@@ -1617,14 +1044,6 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
     }
     .to_string();
     settings.weixin_connect_codex_path = settings.weixin_connect_codex_path.trim().to_string();
-    settings.codex_app_stepwise_max_items =
-        clamp_stepwise_max_items(settings.codex_app_stepwise_max_items);
-    settings.codex_app_stepwise_max_input_chars =
-        clamp_stepwise_max_input_chars(settings.codex_app_stepwise_max_input_chars);
-    settings.codex_app_stepwise_max_output_tokens =
-        clamp_stepwise_max_output_tokens(settings.codex_app_stepwise_max_output_tokens);
-    settings.codex_app_stepwise_timeout_ms =
-        clamp_stepwise_timeout_ms(settings.codex_app_stepwise_timeout_ms);
     settings
 }
 
@@ -1785,12 +1204,6 @@ mod tests {
         assert!(!settings.codex_goals_enabled);
         assert!(settings.codex_app_path.is_empty());
         assert!(settings.codex_extra_args.is_empty());
-        assert_eq!(
-            settings.zed_remote_open_strategy,
-            ZedOpenStrategy::AddToFocusedWorkspace
-        );
-        assert!(settings.zed_remote_project_registry_enabled);
-        assert!(!settings.zed_remote_sync_to_zed_settings);
         assert!(settings.codex_app_native_menu_localization);
         assert_eq!(settings.launch_mode, LaunchMode::Patch);
         assert_eq!(settings.relay_base_url, default_relay_base_url());
@@ -1798,20 +1211,6 @@ mod tests {
         assert_eq!(settings.relay_profiles[0].relay_mode, RelayMode::Official);
         assert!(settings.relay_common_config_contents.is_empty());
         assert_eq!(settings.relay_test_model, default_relay_test_model());
-        assert!(!settings.codex_app_stepwise_enabled);
-        assert!(!settings.codex_app_stepwise_direct_send);
-        assert!(settings.codex_app_stepwise_base_url.is_empty());
-        assert!(settings.codex_app_stepwise_api_key.is_empty());
-        assert_eq!(
-            settings.codex_app_stepwise_api_key_env,
-            "CODEX_STEPWISE_API_KEY"
-        );
-        assert_eq!(settings.codex_app_stepwise_protocol, "chat_completions");
-        assert!(settings.codex_app_stepwise_model.is_empty());
-        assert_eq!(settings.codex_app_stepwise_max_items, 6);
-        assert_eq!(settings.codex_app_stepwise_max_input_chars, 6000);
-        assert_eq!(settings.codex_app_stepwise_max_output_tokens, 500);
-        assert_eq!(settings.codex_app_stepwise_timeout_ms, 8000);
         assert!(!settings.weixin_connect_enabled);
         assert_eq!(
             settings.weixin_connect_base_url,
@@ -1819,31 +1218,6 @@ mod tests {
         );
         assert!(settings.weixin_connect_token.is_empty());
         assert_eq!(settings.weixin_connect_sandbox, "read-only");
-    }
-
-    #[test]
-    fn settings_deserialize_normalizes_stepwise_protocol_and_supports_legacy_missing_field() {
-        let defaults: BackendSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(defaults.codex_app_stepwise_protocol, "chat_completions");
-
-        for protocol in [
-            "chat_completions",
-            "responses",
-            "anthropic_messages",
-            "auto",
-        ] {
-            let settings: BackendSettings = serde_json::from_value(json!({
-                "codexAppStepwiseProtocol": format!(" {protocol} ")
-            }))
-            .unwrap();
-            assert_eq!(settings.codex_app_stepwise_protocol, protocol);
-        }
-
-        let invalid: BackendSettings = serde_json::from_value(json!({
-            "codexAppStepwiseProtocol": "unsupported"
-        }))
-        .unwrap();
-        assert_eq!(invalid.codex_app_stepwise_protocol, "chat_completions");
     }
 
     #[test]
@@ -2379,33 +1753,6 @@ experimental_bearer_token = "sk-existing""#
     }
 
     #[test]
-    fn settings_store_persists_and_normalizes_stepwise_protocol() {
-        let dir = temp_dir();
-        let store = SettingsStore::new(dir.join("settings.json"));
-
-        let updated = store
-            .update(json!({
-                "codexAppStepwiseProtocol": "responses"
-            }))
-            .unwrap();
-        assert_eq!(updated.codex_app_stepwise_protocol, "responses");
-        assert_eq!(
-            store.load().unwrap().codex_app_stepwise_protocol,
-            "responses"
-        );
-
-        let invalid = store
-            .update(json!({
-                "codexAppStepwiseProtocol": "not-a-protocol"
-            }))
-            .unwrap();
-        assert_eq!(invalid.codex_app_stepwise_protocol, "chat_completions");
-        let saved: Value =
-            serde_json::from_str(&std::fs::read_to_string(store.path).unwrap()).unwrap();
-        assert_eq!(saved["codexAppStepwiseProtocol"], "chat_completions");
-    }
-
-    #[test]
     fn settings_store_save_load_roundtrip_preserves_aggregate_relay_settings() {
         let dir = temp_dir();
         let store = SettingsStore::new(dir.join("settings.json"));
@@ -2581,97 +1928,6 @@ experimental_bearer_token = "sk-existing""#
             .unwrap();
 
         assert_eq!(updated.codex_app_image_overlay_fit_mode, "fit");
-    }
-
-    #[test]
-    fn settings_store_update_persists_dream_skin_settings() {
-        let dir = temp_dir();
-        let store = SettingsStore::new(dir.join("settings.json"));
-
-        let updated = store
-            .update(json!({
-                "codexAppDreamSkinEnabled": true,
-                "codexAppDreamSkinTheme": "miku",
-                "codexAppDreamSkinImagePath": " C:\\Users\\me\\Pictures\\dream.webp "
-            }))
-            .unwrap();
-
-        assert!(updated.codex_app_dream_skin_enabled);
-        assert_eq!(updated.codex_app_dream_skin_theme, "miku");
-        assert_eq!(
-            updated.codex_app_dream_skin_image_path,
-            r"C:\Users\me\Pictures\dream.webp"
-        );
-        assert_eq!(store.load().unwrap(), updated);
-    }
-
-    #[test]
-    fn settings_store_defaults_invalid_dream_skin_theme_to_pink() {
-        let dir = temp_dir();
-        let store = SettingsStore::new(dir.join("settings.json"));
-
-        let updated = store
-            .update(json!({
-                "codexAppDreamSkinTheme": "unknown"
-            }))
-            .unwrap();
-
-        assert_eq!(updated.codex_app_dream_skin_theme, "pink");
-    }
-
-    #[test]
-    fn legacy_market_theme_ids_resolve_to_layout_presets() {
-        assert_eq!(
-            resolve_dream_skin_style_preset("preset-cyber-neon", "dream-original"),
-            "cyber-neon"
-        );
-        assert_eq!(
-            resolve_dream_skin_style_preset("codex-snow-skin", ""),
-            "codex-snow"
-        );
-        assert_eq!(
-            resolve_dream_skin_style_preset("custom-theme", "dream-original"),
-            "dream-original"
-        );
-    }
-
-    #[test]
-    fn settings_store_update_persists_stepwise_settings() {
-        let dir = temp_dir();
-        let store = SettingsStore::new(dir.join("settings.json"));
-
-        let updated = store
-            .update(json!({
-                "codexAppStepwiseEnabled": true,
-                "codexAppStepwiseDirectSend": true,
-                "codexAppStepwiseBaseUrl": "https://api.example.test/v1/",
-                "codexAppStepwiseApiKey": " sk-stepwise ",
-                "codexAppStepwiseApiKeyEnv": "",
-                "codexAppStepwiseModel": " stepwise-mini ",
-                "codexAppStepwiseMaxItems": 12,
-                "codexAppStepwiseMaxInputChars": 25000,
-                "codexAppStepwiseMaxOutputTokens": 50,
-                "codexAppStepwiseTimeoutMs": 70000
-            }))
-            .unwrap();
-
-        assert!(updated.codex_app_stepwise_enabled);
-        assert!(updated.codex_app_stepwise_direct_send);
-        assert_eq!(
-            updated.codex_app_stepwise_base_url,
-            "https://api.example.test/v1"
-        );
-        assert_eq!(updated.codex_app_stepwise_api_key, "sk-stepwise");
-        assert_eq!(
-            updated.codex_app_stepwise_api_key_env,
-            default_stepwise_api_key_env()
-        );
-        assert_eq!(updated.codex_app_stepwise_model, "stepwise-mini");
-        assert_eq!(updated.codex_app_stepwise_max_items, 6);
-        assert_eq!(updated.codex_app_stepwise_max_input_chars, 24000);
-        assert_eq!(updated.codex_app_stepwise_max_output_tokens, 100);
-        assert_eq!(updated.codex_app_stepwise_timeout_ms, 60000);
-        assert_eq!(store.load().unwrap(), updated);
     }
 
     #[test]

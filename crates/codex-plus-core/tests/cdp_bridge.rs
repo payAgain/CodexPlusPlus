@@ -6,7 +6,6 @@ use codex_plus_core::cdp::{
     is_quick_chat_page_target, list_targets, pick_injectable_codex_page_target, pick_page_target,
     validate_cdp_websocket_url,
 };
-use codex_plus_core::settings::BackendSettings;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
@@ -103,35 +102,6 @@ fn injection_script_maps_the_renamed_bundled_marketplace_display_name() {
         script.contains(r#"name === "codex-plus-curated" || name === "openai-curated-remote""#)
     );
     assert!(script.contains("OpenAI插件5(Codex++)"));
-}
-
-#[test]
-fn injection_script_omits_stepwise_runtime_when_disabled() {
-    let script = assets::injection_script_with_settings(57321, &BackendSettings::default());
-
-    assert!(!script.contains("const API_KEY = \"__codexStepwisePanel\";"));
-    assert!(script.contains("data-codex-plus-setting=\"stepwise\""));
-}
-
-#[test]
-fn injection_script_includes_stepwise_runtime_when_enabled() {
-    let settings = BackendSettings {
-        codex_app_stepwise_enabled: true,
-        ..Default::default()
-    };
-    let script = assets::injection_script_with_settings(57321, &settings);
-
-    assert!(script.contains("const API_KEY = \"__codexStepwisePanel\";"));
-}
-
-#[test]
-fn stepwise_script_uses_the_floating_panel_entrypoint() {
-    let script = assets::stepwise_script();
-
-    assert!(script.starts_with("(() => {\n"));
-    assert!(script.ends_with("\n})();\n"));
-    assert!(script.contains("Public floating-panel injection entry"));
-    assert_eq!(script.matches("window[API_KEY] = {").count(), 1);
 }
 
 #[test]
@@ -600,163 +570,6 @@ fn rejects_cdp_websocket_with_wrong_scheme_or_missing_port() {
 }
 
 #[test]
-fn injection_script_installs_dream_skin_from_backend_settings() {
-    let mut settings = codex_plus_core::settings::BackendSettings {
-        codex_app_dream_skin_enabled: true,
-        codex_app_dream_skin_paused: false,
-        codex_app_dream_skin_theme_config: codex_plus_core::settings::DreamSkinThemeConfig {
-            name: "Upstream Theme".to_string(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    settings
-        .codex_app_dream_skin_theme_config
-        .extra_fields
-        .insert(
-            "companion".to_string(),
-            serde_json::json!({
-                "dataUrl": "data:image/webp;base64,UklGRg==",
-                "width": 96,
-                "side": "right"
-            }),
-        );
-    let script = assets::injection_script_with_settings(57321, &settings);
-
-    assert!(script.contains("dreamSkinEnabled: \"codexAppDreamSkinEnabled\""));
-    assert!(script.contains("dreamSkinPaused: \"codexAppDreamSkinPaused\""));
-    assert!(script.contains("dreamSkinThemeConfig: \"codexAppDreamSkinThemeConfig\""));
-    assert!(script.contains("dreamSkinImagePath: \"codexAppDreamSkinImagePath\""));
-    assert!(!script.contains("window.__CODEX_PLUS_DREAM_SKIN_STYLES__ ="));
-    assert!(!script.contains("window.__CODEX_PLUS_DREAM_SKIN_CSS__"));
-    assert!(script.contains("window.__CODEX_PLUS_DREAM_SKIN_PLATFORM__"));
-    assert!(script.contains("window.__CODEX_PLUS_DREAM_SKIN_REVISION__"));
-    assert!(script.contains("window.__CODEX_PLUS_DREAM_SKIN_ART__"));
-    assert!(script.contains(if cfg!(windows) {
-        "data:image/jpeg;base64,"
-    } else {
-        "data:image/png;base64,"
-    }));
-    assert!(script.contains("codex-dream-skin-style"));
-    assert!(script.contains("codex-dream-skin-chrome"));
-    assert!(script.contains("URL.createObjectURL(new Blob"));
-    assert!(script.contains("URL.revokeObjectURL(state.artUrl)"));
-    assert!(!script.contains("/dream-skin/image?v="));
-    assert!(script.contains("window.__CODEX_PLUS_EXTERNAL_DREAM_SKIN_RUNTIME__ = true"));
-    assert!(script.contains("window.__CODEX_PLUS_CLEAR_DREAM_SKIN__?.();"));
-    assert!(script.contains("window.__CODEX_PLUS_DREAM_SKIN_TARGET_ENGINE__"));
-    assert!(script.contains("state.version = `codex-plus:"));
-    assert!(script.contains("state.observer?.disconnect?.()"));
-    assert!(script.contains("window.__CODEX_PLUS_DREAM_SKIN_PAYLOAD_SIGNATURE__"));
-    assert!(script.contains("window.__CODEX_PLUS_DREAM_SKIN_THEME__"));
-    assert!(script.contains("data:image/webp;base64,UklGRg=="));
-    assert!(script.contains("codex-dream-skin-companion"));
-    assert!(script.contains("removeDreamSkinCompanion"));
-    if cfg!(windows) {
-        assert!(script.contains(":root.codex-dream-skin"));
-        assert!(!script.contains("薛凯琪专属定制皮肤"));
-    }
-    assert!(script.contains(".group\\\\/home-suggestions"));
-    assert!(script.contains("--dream-skin-art"));
-    assert!(script.contains("--dream-art"));
-    assert!(script.contains("function refreshDreamSkin()"));
-    assert!(script.contains(
-        "codexPlusBackendSettingsLoaded && (!settings.dreamSkinEnabled || settings.dreamSkinPaused)"
-    ));
-    assert!(script.contains("window.__CODEX_PLUS_DREAM_SKIN_RUNTIME_REVISION__"));
-    assert!(script.contains("window.__CODEX_PLUS_DREAM_SKIN_ART_SIGNATURE__"));
-    assert!(!script.contains(
-        "attributeFilter: [\"class\", \"data-theme\", \"data-appearance\", \"data-color-mode\", \"style\"]"
-    ));
-    assert!(script.contains("codexAppDreamSkinEnabled"));
-    assert!(script.contains("codexAppDreamSkinPaused"));
-    assert!(script.contains("codexAppDreamSkinThemeConfig"));
-    assert!(script.contains("Upstream Theme"));
-    assert!(script.contains("codexAppDreamSkinImagePath"));
-    assert!(script.contains("const STATE_KEY = \"__CODEX_DREAM_SKIN_STATE__\""));
-    assert!(!script.contains("artDataUrl.slice(-64)"));
-    assert!(!script.contains("luckyGod:"));
-}
-
-#[test]
-fn dream_skin_live_update_script_excludes_the_full_renderer_runtime() {
-    let settings = codex_plus_core::settings::BackendSettings {
-        codex_app_dream_skin_enabled: true,
-        codex_app_dream_skin_theme_config: codex_plus_core::settings::DreamSkinThemeConfig {
-            name: "Lightweight Theme".to_string(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let probe = assets::dream_skin_live_update_probe_script();
-    let update = assets::dream_skin_live_update_script(&settings, true);
-    let metadata_only_update = assets::dream_skin_live_update_script(&settings, false);
-    let full = assets::injection_script_with_settings(57321, &settings);
-
-    assert!(probe.contains("__CODEX_PLUS_DREAM_SKIN_RUNTIME_REVISION__"));
-    assert!(probe.contains("payloadSignature"));
-    assert!(probe.contains("__CODEX_DREAM_SKIN_STATE__"));
-    assert!(probe.contains("__CODEX_GLASS_VISION_SKIN_STATE__"));
-    assert!(update.contains("Lightweight Theme"));
-    assert!(update.contains("__CODEX_PLUS_DREAM_SKIN_ART_SIGNATURE__"));
-    assert!(update.contains(if cfg!(windows) {
-        "data:image/jpeg;base64,"
-    } else {
-        "data:image/png;base64,"
-    }));
-    assert!(!metadata_only_update.contains("base64,"));
-    assert!(!update.contains("__CODEX_PLUS_SPONSOR_IMAGES__"));
-    assert!(!update.contains("__codexSessionDeleteObserver"));
-    assert!(!update.contains("function refreshDreamSkin()"));
-    assert!(metadata_only_update.len() < full.len());
-}
-
-#[test]
-fn dream_skin_style_presets_select_their_original_target_engines() {
-    for (id, expected_engine) in [
-        ("caishen-lite", "dream-skin"),
-        ("preset-midnight-aurora", "cidala-tiger"),
-        ("codex-snow-skin", "snow"),
-        ("glass-vision", "glass-vision"),
-    ] {
-        let settings = codex_plus_core::settings::BackendSettings {
-            codex_app_dream_skin_enabled: true,
-            codex_app_dream_skin_theme_config: codex_plus_core::settings::DreamSkinThemeConfig {
-                id: id.to_string(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let script = assets::dream_skin_live_update_script(&settings, true);
-
-        assert!(
-            script.contains(&format!(
-                "window.__CODEX_PLUS_DREAM_SKIN_TARGET_ENGINE__ = \"{expected_engine}\""
-            )),
-            "wrong target engine for {id}"
-        );
-        assert!(!script.contains("__DREAM_"));
-        assert!(!script.contains("__GLASS_VISION_"));
-    }
-}
-
-#[test]
-fn dream_skin_bundles_a_real_default_image() {
-    let (content_type, image) = assets::dream_skin_default_image();
-
-    if cfg!(windows) {
-        assert_eq!(content_type, "image/jpeg");
-        assert!(image.len() > 600_000);
-        assert_eq!(&image[..3], b"\xFF\xD8\xFF");
-    } else {
-        assert_eq!(content_type, "image/png");
-        assert!(image.len() > 1_000_000);
-        assert_eq!(&image[..8], b"\x89PNG\r\n\x1a\n");
-    }
-}
-
-#[test]
 fn injection_script_marks_diagnostic_build_and_reports_script_loaded() {
     let script = assets::injection_script(57321);
 
@@ -764,19 +577,6 @@ fn injection_script_marks_diagnostic_build_and_reports_script_loaded() {
     assert!(script.contains(codex_plus_core::assets::DIAGNOSTIC_BUILD_ID));
     assert!(script.contains("script_loaded"));
     assert!(script.contains("data-codex-plus-build"));
-}
-
-#[test]
-fn injection_script_fetches_ads_without_bridge() {
-    let script = assets::injection_script(57321);
-
-    assert!(script.contains("directFetchCodexPlusAds"));
-    assert!(script.contains("cacheBustCodexPlusAdUrl"));
-    assert!(script.contains("Date.now()"));
-    assert!(script.contains("BigPizzaV3/Ad-List"));
-    assert!(
-        !script.contains("codexPlusAds = normalizeCodexPlusAds(await postJson(\"/ads\", {}));")
-    );
 }
 
 #[test]
@@ -808,104 +608,6 @@ fn injection_script_menu_exposes_marketplace_plugin_switch_only() {
     assert!(!script.contains("forcePluginInstall"));
     assert!(!script.contains("强制解锁入口"));
     assert!(!script.contains("data-codex-plus-setting=\"pluginEntryUnlock\""));
-}
-
-#[test]
-fn injection_script_menu_exposes_stepwise_switch_and_syncs_panel() {
-    let settings = BackendSettings {
-        codex_app_stepwise_enabled: true,
-        ..Default::default()
-    };
-    let script = assets::injection_script_with_settings(57321, &settings);
-
-    assert!(script.contains("stepwise: false"));
-    assert!(script.contains("stepwise: \"codexAppStepwiseEnabled\""));
-    assert!(script.contains("Stepwise"));
-    assert!(script.contains("data-codex-plus-setting=\"stepwise\""));
-    assert!(script.contains("function syncStepwisePanel"));
-    assert!(script.contains("window.__codexStepwisePanel?.syncSettings"));
-    assert!(script.contains("if (key === \"stepwise\") syncStepwisePanel(value)"));
-    assert!(script.contains("if (patch?.enabled === true)"));
-    assert!(script.contains("activateRuntime();"));
-}
-
-#[test]
-fn stepwise_runtime_stops_work_when_disabled() {
-    let script = assets::stepwise_script().replace("\r\n", "\n");
-
-    assert!(script.contains("function stepwiseEnabled()"));
-    assert!(script.contains("if (!stepwiseEnabled()) {"));
-    assert!(script.contains("stopRuntime();"));
-    assert!(script.contains(
-        "function requestBridgeStepwise(key, userText, assistantText) {\n    if (!stepwiseEnabled()) return;"
-    ));
-}
-
-#[test]
-fn stepwise_direct_send_targets_main_chat_composer() {
-    let script = assets::stepwise_script();
-
-    assert!(script.contains("function elementCenter("));
-    assert!(script.contains("function horizontalOverlapRatio("));
-    assert!(script.contains("function ignoredComposerContainer("));
-    assert!(script.contains("function mainComposerCandidate("));
-    assert!(script.contains("mainComposerCandidate(candidates)"));
-    assert!(!script.contains("const target = candidates[candidates.length - 1];"));
-}
-
-#[test]
-fn stepwise_scan_does_not_require_composer_for_suggestions() {
-    let script = assets::stepwise_script();
-
-    assert!(!script.contains("if (!composerCandidates().length) return false;"));
-}
-
-#[test]
-fn stepwise_assistant_detection_accepts_two_action_buttons() {
-    let script = assets::stepwise_script();
-
-    assert!(script.contains("if (count >= 2) return current;"));
-    assert!(script.contains("if (count < 2) continue;"));
-    assert!(!script.contains("if (count >= 3) return current;"));
-    assert!(!script.contains("if (count < 3) continue;"));
-}
-
-#[test]
-fn stepwise_refreshes_suggestions_for_virtualized_assistant_bubbles() {
-    let script = assets::stepwise_script();
-
-    assert!(script.contains("function assistantBubbleCandidates("));
-    assert!(script.contains("\".group.flex.min-w-0.flex-col\""));
-    assert!(script.contains("candidates.push(...assistantBubbleCandidates())"));
-    assert!(script.contains("function latestMessageByDocumentOrder("));
-    assert!(script.contains("function clearPromptsForNewAssistant("));
-    assert!(script.contains(
-        "if (state.prompts.length || state.currentHash) clearPromptsForNewAssistant(hash);"
-    ));
-    assert!(script.contains("function setScanStatus("));
-    assert!(script.contains("setScanStatus(\"not-ready\""));
-    assert!(script.contains("setScanStatus(\"no-assistant-message\""));
-    assert!(!script.contains("setScanStatus(\"surface-not-ready\""));
-    assert!(!script.contains("return fallback[fallback.length - 1] || null;"));
-}
-
-#[test]
-fn stepwise_exposes_manual_refresh_without_refreshing_busy_chats() {
-    let script = assets::stepwise_script();
-
-    assert!(script.contains("data-action=\"refresh\""));
-    assert!(script.contains("function forceRefreshStepwise("));
-    assert!(script.contains("state.bridgeStatus === \"pending\" || chatBusy()"));
-    assert!(script.contains("setScanStatus(\"manual-refresh-busy\""));
-    assert!(script.contains("state.bridgeCache.delete(bridgeKey)"));
-    assert!(script.contains("requestBridgeStepwise(bridgeKey, userText, assistantText)"));
-}
-
-#[test]
-fn stepwise_opens_manager_as_transient_window() {
-    let script = assets::stepwise_script();
-
-    assert!(script.contains("bridgeCall(\"/manager/open-transient\", {})"));
 }
 
 #[test]
@@ -1457,7 +1159,7 @@ fn injection_script_refreshes_sidebar_after_session_undo() {
         .split_once("function showToast(message, undoToken)")
         .expect("undo toast should exist")
         .1
-        .split_once("function upstreamWorktreeField")
+        .split_once("function exportMarkdown")
         .expect("undo toast should end before worktree helpers")
         .0;
 
@@ -2670,94 +2372,6 @@ fn injection_script_restores_thread_scroll_positions() {
 }
 
 #[test]
-fn injection_script_installs_upstream_branch_dropdown_adapter() {
-    let script = assets::injection_script(57321);
-
-    assert!(script.contains("installUpstreamBranchDropdownAdapter"));
-    assert!(!script.contains("installUpstreamPendingWorktreeDispatcherPatch"));
-    assert!(script.contains("data-codex-upstream-branch-option"));
-    assert!(script.contains("codexUpstreamBranchSelection"));
-    assert!(script.contains("/upstream-worktree/defaults"));
-    assert!(script.contains("/upstream-worktree/prepare"));
-    assert!(script.contains("injectUpstreamBranchOptions"));
-    assert!(script.contains("Upstream"));
-    assert!(script.contains("data-base-branch"));
-    assert!(script.contains("data-project-id"));
-    assert!(script.contains("MutationObserver"));
-    assert!(script.contains("upstreamWorktreePayloadFromSelection"));
-    assert!(script.contains("readUpstreamBranchSelection"));
-    assert!(script.contains("writeUpstreamBranchSelection(null)"));
-    assert!(script.contains("currentProjectRepoPathFromSelectedProjectButton"));
-    assert!(script.contains("currentProjectContextFromStartButton"));
-    assert!(script.contains("Start new chat in"));
-    assert!(script.contains("codexUpstreamProjectContext"));
-    assert!(script.contains("rememberStartNewChatProjectContext"));
-    assert!(script.contains("currentProjectContextForBranchMenu"));
-    assert!(script.contains("remoteProjectContextFromGlobalState"));
-    assert!(script.contains("upstreamBranchDefaultsInflight = new Map()"));
-    assert!(script.contains("upstreamRemoteBranchDefaultsCacheTtlMs"));
-    assert!(script.contains("upstreamBranchDefaultsInflight.delete(cacheKey)"));
-    assert!(script.contains("projectId:"));
-    assert!(script.contains("data-codex-upstream-branch-selection-label"));
-    assert!(script.contains("syncUpstreamBranchTriggerLabel"));
-    assert!(script.contains("syncUpstreamBranchMenuSelection"));
-    assert!(!script.contains("applyUpstreamPendingWorktreeOverride"));
-    assert!(!script.contains("pending-worktree-create"));
-    assert!(script.contains("qualifiedSourceRef"));
-    assert!(script.contains("refs/remotes/${remote}/${baseBranch}"));
-    assert!(!script.contains("startingState: { ...request.startingState, branchName: sourceRef }"));
-    assert!(script.contains("data-codex-upstream-branch-check"));
-    assert!(script.contains("data-codex-upstream-branch-icon"));
-    assert!(script.contains("branchIconSvg"));
-    assert!(script.contains("checkmarkSvg"));
-    assert!(script.contains("aria-checked"));
-    assert!(script.contains("check.removeAttribute(\"hidden\")"));
-    assert!(script.contains("check.setAttribute(\"hidden\", \"\")"));
-    assert!(script.contains("handleNativeBranchSelection"));
-    assert!(script.contains("clearUpstreamBranchTriggerLabel"));
-    assert!(!script.contains(r#"text.includes("/")"#));
-    assert!(script.contains("newWorktreeModeActive"));
-    assert!(script.contains("effectiveElementRect"));
-    assert!(script.contains("removeUpstreamBranchOptions"));
-    assert!(script.contains("cleanupInvalidUpstreamBranchOptions"));
-    assert!(script.contains("branchMenuInNewWorktreeMode"));
-    assert!(script.contains("branchMenuTriggerIsBranchControl"));
-    assert!(script.contains("actual-upstream-refs-v17"));
-    assert!(script.contains("create and checkout new branch"));
-    assert!(script.contains("if (/^start in"));
-    assert!(script.contains("if (!branchMenuInNewWorktreeMode(trigger))"));
-    assert!(script.contains("window.__codexUpstreamBranchDropdownObserver?.disconnect?.()"));
-    assert!(script.contains("record.addedNodes"));
-    assert!(script.contains("addedNodeContainsBranchMenu"));
-    assert!(!script.contains("new MutationObserver(schedule).observe"));
-    assert!(script.contains(r#".composer-footer button, .composer-footer [role="button"]"#));
-    assert!(!script.contains("return [...document.querySelectorAll('button')]"));
-}
-
-#[test]
-fn injection_script_prevents_switching_to_branches_used_by_other_worktrees() {
-    let script = assets::injection_script(57321);
-
-    assert!(script.contains("data-codex-branch-worktree-path"));
-    assert!(script.contains("annotateBranchMenuWorktreeUsage"));
-    assert!(script.contains("branchWorktreePathFromMenuItem"));
-    assert!(script.contains("该分支已在另一个 worktree 使用"));
-    assert!(script.contains("event.stopImmediatePropagation?.()"));
-}
-
-#[test]
-fn injection_script_rebuilds_upstream_options_for_each_project_branch_menu() {
-    let script = assets::injection_script(57321);
-
-    assert!(!script.contains("currentProjectRepoPathForBranchMenu"));
-    assert!(!script.contains("repoPathFromProjectLabel"));
-    assert!(script.contains("projectContextFromProjectLabel"));
-    assert!(script.contains("upstreamBranchOptionsMatchRefs"));
-    assert!(script.contains("upstreamBranchDefaultsCache = new Map()"));
-    assert!(script.contains("actual-upstream-refs-v17"));
-}
-
-#[test]
 fn manager_ui_exposes_pure_api_relay_mode_button() {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -2785,6 +2399,32 @@ fn manager_ui_omits_plugin_auto_expand() {
 
     assert!(!source.contains("codexAppPluginAutoExpand"));
     assert!(!source.contains("插件列表全量展示"));
+}
+
+#[test]
+fn manager_ui_omits_hardcoded_sponsor_card() {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("core crate should live under crates/codex-plus-core");
+    let source = std::fs::read_to_string(repo.join("apps/codex-plus-manager/src/App.tsx")).unwrap();
+
+    assert!(!source.contains("项目赞助商"));
+    assert!(!source.contains("jojocode-overview"));
+    assert!(!source.contains("打开 JOJO Code"));
+}
+
+#[test]
+fn manager_ui_omits_skin_management() {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("core crate should live under crates/codex-plus-core");
+    let source = std::fs::read_to_string(repo.join("apps/codex-plus-manager/src/App.tsx")).unwrap();
+
+    assert!(!source.contains("皮肤管理"));
+    assert!(!source.contains("dreamSkin"));
+    assert!(!source.contains("DreamSkin"));
 }
 
 #[test]
@@ -3765,7 +3405,7 @@ async fn install_bridge_does_not_wait_for_resolve_runtime_evaluate_ack() {
 }
 
 #[tokio::test]
-async fn install_bridge_keeps_status_responsive_while_generate_is_pending() {
+async fn install_bridge_keeps_status_responsive_while_request_is_pending() {
     let generate_started = Arc::new(Notify::new());
     let release_generate = Arc::new(Notify::new());
     let server_generate_started = Arc::clone(&generate_started);
@@ -3780,7 +3420,7 @@ async fn install_bridge_keeps_status_responsive_while_generate_is_pending() {
                 "params": {
                     "payload": serde_json::to_string(&json!({
                         "id": "generate",
-                        "path": "/stepwise/generate",
+                        "path": "/share/create",
                         "payload": {},
                     })).unwrap(),
                 },
@@ -3830,7 +3470,7 @@ async fn install_bridge_keeps_status_responsive_while_generate_is_pending() {
         let generate_started = Arc::clone(&handler_generate_started);
         let release_generate = Arc::clone(&handler_release_generate);
         Box::pin(async move {
-            if path == "/stepwise/generate" {
+            if path == "/share/create" {
                 generate_started.notify_one();
                 release_generate.notified().await;
             }

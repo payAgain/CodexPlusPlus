@@ -16,6 +16,9 @@ const RELAY_PROVIDER: &str = "custom";
 /// serde 当未知字段丢掉。skill 靠 `$CODEX_HOME/skills/<id>/SKILL.md` 目录发现，
 /// 由 crate::skills 管理。
 const CONTEXT_TABLE_NAMES: [&str; 2] = ["mcp_servers", "plugins"];
+const MULTI_AGENT_V2_FEATURE: &str = "multi_agent_v2";
+const YOLO_SANDBOX_MODE_KEY: &str = "sandbox_mode";
+const YOLO_APPROVAL_POLICY_KEY: &str = "approval_policy";
 const LEGACY_RELAY_PROVIDERS: &[&str] = &["CodexPlusPlus", "CodexPP"];
 const CC_SWITCH_MODEL_CATALOG_FILENAME: &str = "cc-switch-model-catalog.json";
 const CHAT_UPSTREAM_BASE_URL_KEY: &str = "codex_plus_chat_base_url";
@@ -490,7 +493,12 @@ fn relay_profile_auth_contents_for_apply(profile: &RelayProfile) -> anyhow::Resu
     if profile.uses_no_auth() {
         no_auth_auth_contents(&profile.auth_contents)
     } else {
-        Ok(profile.auth_contents.clone())
+        let auth_contents = if profile.relay_mode == crate::settings::RelayMode::PureApi {
+            pure_api_auth_contents_for_apply(&profile.auth_contents)?
+        } else {
+            profile.auth_contents.clone()
+        };
+        Ok(auth_contents)
     }
 }
 
@@ -939,17 +947,36 @@ pub fn merge_common_config_into_config(
     }
 
     let mut target_doc = parse_toml_document(config_text)?;
-    let profile_goals_override = target_doc
-        .get("features")
-        .and_then(Item::as_table_like)
-        .and_then(|features| features.get("goals"))
-        .and_then(Item::as_bool);
+    let profile_goals_override = profile_feature_bool_override(&target_doc, "goals");
+    let profile_multi_agent_override =
+        profile_feature_bool_override(&target_doc, MULTI_AGENT_V2_FEATURE);
+    let profile_sandbox_override = profile_root_string_override(&target_doc, YOLO_SANDBOX_MODE_KEY);
+    let profile_approval_override =
+        profile_root_string_override(&target_doc, YOLO_APPROVAL_POLICY_KEY);
     let source_doc = parse_toml_document(trimmed)?;
     merge_toml_table_like(target_doc.as_table_mut(), source_doc.as_table());
     if let Some(enabled) = profile_goals_override {
         table_mut_or_insert(&mut target_doc, "features")?["goals"] = toml_edit::value(enabled);
     }
+    if let Some(enabled) = profile_multi_agent_override {
+        table_mut_or_insert(&mut target_doc, "features")?[MULTI_AGENT_V2_FEATURE] =
+            toml_edit::value(enabled);
+    }
+    if let Some(value) = profile_sandbox_override {
+        target_doc[YOLO_SANDBOX_MODE_KEY] = toml_edit::value(value);
+    }
+    if let Some(value) = profile_approval_override {
+        target_doc[YOLO_APPROVAL_POLICY_KEY] = toml_edit::value(value);
+    }
     Ok(normalize_optional_toml(target_doc))
+}
+
+fn profile_root_string_override(doc: &DocumentMut, key: &str) -> Option<String> {
+    doc.get(key)?.as_str().map(str::to_string)
+}
+
+fn profile_feature_bool_override(doc: &DocumentMut, key: &str) -> Option<bool> {
+    doc.get("features")?.as_table_like()?.get(key)?.as_bool()
 }
 
 pub fn list_context_entries_from_common_config(
@@ -1015,7 +1042,28 @@ pub fn prepare_common_config_for_apply(common_config: &str) -> anyhow::Result<St
         strip_legacy_skill_tables(&sanitize_common_config_contents(common_config));
     let mut filtered = parse_toml_document(&sanitized_common)?;
     remove_disabled_context_tables(filtered.as_table_mut());
+    ensure_multi_agent_v2_feature(&mut filtered)?;
+    ensure_yolo_mode_defaults(&mut filtered)?;
     Ok(normalize_optional_toml(filtered))
+}
+
+fn ensure_yolo_mode_defaults(doc: &mut DocumentMut) -> anyhow::Result<()> {
+    if doc.get(YOLO_SANDBOX_MODE_KEY).is_none() {
+        doc[YOLO_SANDBOX_MODE_KEY] = toml_edit::value("danger-full-access");
+    }
+    if doc.get(YOLO_APPROVAL_POLICY_KEY).is_none() {
+        doc[YOLO_APPROVAL_POLICY_KEY] = toml_edit::value("never");
+    }
+    Ok(())
+}
+
+fn ensure_multi_agent_v2_feature(doc: &mut DocumentMut) -> anyhow::Result<()> {
+    // 自定义 Provider 的 multi-agent 工具走 V2 路径；显式 false 保留给用户关闭。
+    let features = table_mut_or_insert(doc, "features")?;
+    if features.get(MULTI_AGENT_V2_FEATURE).is_none() {
+        features.insert(MULTI_AGENT_V2_FEATURE, toml_edit::value(true));
+    }
+    Ok(())
 }
 
 pub fn sync_live_config_context_entries(
@@ -2321,6 +2369,25 @@ fn restore_profile_credentials_after_backfill(
     Ok(())
 }
 
+fn pure_api_auth_contents_for_apply(auth_contents: &str) -> anyhow::Result<String> {
+    if auth_contents.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let mut value =
+        serde_json::from_str::<Value>(auth_contents).with_context(|| "auth.json JSON 解析失败")?;
+    let Some(object) = value.as_object_mut() else {
+        anyhow::bail!("auth.json 必须是 JSON 对象");
+    };
+    // Pure API 只用 OPENAI_API_KEY 鉴权；残留的 ChatGPT 登录字段会让 Codex 对
+    // GPT 等模型误判为需要官方登录（kuaipao/cc-switch 场景）。
+    object.remove("auth_mode");
+    object.remove("tokens");
+    if object.is_empty() {
+        return Ok("{}\n".to_string());
+    }
+    Ok(format!("{}\n", serde_json::to_string_pretty(&value)?))
+}
+
 fn set_openai_api_key_in_auth_contents(
     auth_contents: &str,
     api_key: &str,
@@ -2334,6 +2401,10 @@ fn set_openai_api_key_in_auth_contents(
         auth = json!({});
     }
     if let Some(auth_object) = auth.as_object_mut() {
+        // Pure API 只用 OPENAI_API_KEY 鉴权；残留的 ChatGPT 登录字段会让 Codex 对
+        // GPT 等模型误判为需要官方登录（kuaipao/cc-switch 场景）。
+        auth_object.remove("auth_mode");
+        auth_object.remove("tokens");
         if api_key.trim().is_empty() {
             auth_object.remove("OPENAI_API_KEY");
         } else {
@@ -3118,6 +3189,84 @@ mod tests {
                 .unwrap();
         let doc = merged.parse::<DocumentMut>().unwrap();
         assert_eq!(doc["features"]["goals"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn prepare_common_config_enables_multi_agent_v2_by_default() {
+        let prepared = prepare_common_config_for_apply("").unwrap();
+        let doc = prepared.parse::<DocumentMut>().unwrap();
+        assert_eq!(doc["features"]["multi_agent_v2"].as_bool(), Some(true));
+
+        let preserved = prepare_common_config_for_apply(
+            "[features]\nmulti_agent_v2 = false\nfast_mode = true\n",
+        )
+        .unwrap();
+        let doc = preserved.parse::<DocumentMut>().unwrap();
+        assert_eq!(doc["features"]["multi_agent_v2"].as_bool(), Some(false));
+        assert_eq!(doc["features"]["fast_mode"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn merge_common_config_preserves_explicit_profile_multi_agent_override() {
+        let merged = merge_common_config_into_config(
+            "[features]\nmulti_agent_v2 = false\n",
+            "[features]\nmulti_agent_v2 = true\n",
+        )
+        .unwrap();
+        let doc = merged.parse::<DocumentMut>().unwrap();
+        assert_eq!(doc["features"]["multi_agent_v2"].as_bool(), Some(false));
+    }
+
+    #[test]
+    fn prepare_common_config_enables_yolo_mode_defaults() {
+        let prepared = prepare_common_config_for_apply("").unwrap();
+        let doc = prepared.parse::<DocumentMut>().unwrap();
+        assert_eq!(doc["sandbox_mode"].as_str(), Some("danger-full-access"));
+        assert_eq!(doc["approval_policy"].as_str(), Some("never"));
+
+        let preserved = prepare_common_config_for_apply(
+            "sandbox_mode = \"read-only\"\napproval_policy = \"on-request\"\n",
+        )
+        .unwrap();
+        let doc = preserved.parse::<DocumentMut>().unwrap();
+        assert_eq!(doc["sandbox_mode"].as_str(), Some("read-only"));
+        assert_eq!(doc["approval_policy"].as_str(), Some("on-request"));
+    }
+
+    #[test]
+    fn merge_common_config_preserves_explicit_profile_yolo_override() {
+        let merged = merge_common_config_into_config(
+            "sandbox_mode = \"workspace-write\"\napproval_policy = \"on-request\"\n",
+            "sandbox_mode = \"danger-full-access\"\napproval_policy = \"never\"\n",
+        )
+        .unwrap();
+        let doc = merged.parse::<DocumentMut>().unwrap();
+        assert_eq!(doc["sandbox_mode"].as_str(), Some("workspace-write"));
+        assert_eq!(doc["approval_policy"].as_str(), Some("on-request"));
+    }
+
+    #[test]
+    fn pure_api_auth_helpers_strip_chatgpt_login_for_any_provider() {
+        let cleaned = pure_api_auth_contents_for_apply(
+            r#"{"OPENAI_API_KEY":"sk-any","auth_mode":"chatgpt","tokens":{"access_token":"stale"},"vendor":"v"}"#,
+        )
+        .unwrap();
+        let auth: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
+        assert_eq!(auth["OPENAI_API_KEY"], "sk-any");
+        assert_eq!(auth["vendor"], "v");
+        assert!(auth.get("auth_mode").is_none());
+        assert!(auth.get("tokens").is_none());
+
+        let rewritten = set_openai_api_key_in_auth_contents(
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"stale"},"last_refresh":"keep"}"#,
+            "sk-other",
+        )
+        .unwrap();
+        let auth: serde_json::Value = serde_json::from_str(&rewritten).unwrap();
+        assert_eq!(auth["OPENAI_API_KEY"], "sk-other");
+        assert_eq!(auth["last_refresh"], "keep");
+        assert!(auth.get("auth_mode").is_none());
+        assert!(auth.get("tokens").is_none());
     }
 
     #[test]

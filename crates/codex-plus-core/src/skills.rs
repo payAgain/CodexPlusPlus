@@ -1,6 +1,7 @@
 //! Codex Skills 管理。
 //!
-//! codex 的 skill 是文件系统约定，不是配置项：它扫描 `$CODEX_HOME/skills/<id>/SKILL.md`，
+//! codex 的 skill 是文件系统约定，不是配置项：它扫描 `$CODEX_HOME/skills/<id>/SKILL.md` 与
+//! `~/.agents/skills/<id>/SKILL.md`（Codex Desktop 两处都会读），
 //! 从 YAML frontmatter 读 `name` / `description`，然后把清单注入 `<skills_instructions>`。
 //! `config.toml` 里的 `[skills]` 是一个三字段结构体（bundled / include_instructions /
 //! max_context_tokens），写 `[skills.<id>]` 会被 serde 当未知字段静默丢弃，什么都不会发生。
@@ -8,7 +9,8 @@
 //! 所以这里采用「SSOT + 软链」模型（与 cc-switch 一致）：
 //!
 //! - 安装：下载仓库 zip，只解出目标 skill 子树到 `~/.codex-session-delete/skills/<id>/`
-//! - 启用：`$CODEX_HOME/skills/<id>` 软链到源目录（软链目录 codex 同样能发现）
+//! - 启用：新装/更新的 skill 默认软链到 `~/.agents/skills/<id>`（Codex Desktop 的一级发现根）；
+//!   旧版已装在 `~/.codex/skills/<id>` 的记录继续按 codex 根管理，不自动迁移
 //! - 停用：只删软链，源目录保留
 //! - 卸载：源目录整体移到 `~/.codex-session-delete/skill-backups/<id>-<ts>/`
 //! - 更新检测：GitHub trees API 返回每个文件的 blob sha，据此算子树哈希，不下载内容
@@ -27,6 +29,11 @@ use sha2::{Digest, Sha256};
 
 const SKILL_MANIFEST_FILE: &str = "SKILL.md";
 const BUNDLED_SKILLS_DIR: &str = ".system";
+const SKILL_TARGET_CODEX: &str = "codex";
+const SKILL_TARGET_AGENTS: &str = "agents";
+const SKILL_TARGETS: [&str; 2] = [SKILL_TARGET_CODEX, SKILL_TARGET_AGENTS];
+/// 本地 `.agents` 技能备份旁的侧车标记，恢复时按它放回原目录。
+const BACKUP_RESTORE_TARGET_SUFFIX: &str = ".restore-target";
 /// 单个仓库 zip 的下载上限。skill 仓库都是纯文本，64 MiB 足够宽松了。
 const REPO_ZIP_DOWNLOAD_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
@@ -50,6 +57,16 @@ fn default_branch() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+/// 老记录没有 `targets` 字段时的缺省：沿用旧版「只管理 codex 根」的语义。
+fn default_skill_targets() -> Vec<String> {
+    vec![SKILL_TARGET_CODEX.to_string()]
+}
+
+/// 新安装/更新/恢复使用的默认目标根：`~/.agents/skills`。
+fn new_skill_targets() -> Vec<String> {
+    vec![SKILL_TARGET_AGENTS.to_string()]
 }
 
 impl SkillRepo {
@@ -79,6 +96,9 @@ pub struct InstalledSkill {
     pub content_hash: String,
     #[serde(default)]
     pub installed_at: String,
+    /// 应用登记过的发现根（`codex` / `agents`）。老记录缺省只有 codex。
+    #[serde(default = "default_skill_targets")]
+    pub targets: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,6 +180,10 @@ pub struct SkillEntry {
     pub enabled: bool,
     /// codex 自带的 `.system` skill，只读展示，不能安装/卸载。
     pub bundled: bool,
+    /// 应用登记过的发现根；本地直接管理的 `.agents` 技能也标 agents。
+    pub targets: Vec<String>,
+    /// 是否由应用 SSOT 托管（可启停/更新）；false 表示 `~/.agents/skills` 本地技能。
+    pub managed: bool,
     pub content_hash: String,
     pub remote_hash: String,
     pub update_available: bool,
@@ -180,6 +204,7 @@ pub struct SkillsManager {
     backups_dir: PathBuf,
     state_path: PathBuf,
     codex_home: PathBuf,
+    agents_home: PathBuf,
     state_lock: Arc<Mutex<()>>,
 }
 
@@ -190,11 +215,29 @@ impl SkillsManager {
         state_path: impl Into<PathBuf>,
         codex_home: impl Into<PathBuf>,
     ) -> Self {
+        Self::new_with_agents(
+            source_dir,
+            backups_dir,
+            state_path,
+            codex_home,
+            crate::paths::default_agents_home_dir(),
+        )
+    }
+
+    /// 显式指定 agents 主目录的构造器。生产环境传 `paths::default_agents_home_dir()`。
+    pub fn new_with_agents(
+        source_dir: impl Into<PathBuf>,
+        backups_dir: impl Into<PathBuf>,
+        state_path: impl Into<PathBuf>,
+        codex_home: impl Into<PathBuf>,
+        agents_home: impl Into<PathBuf>,
+    ) -> Self {
         Self {
             source_dir: source_dir.into(),
             backups_dir: backups_dir.into(),
             state_path: state_path.into(),
             codex_home: codex_home.into(),
+            agents_home: agents_home.into(),
             state_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -203,9 +246,27 @@ impl SkillsManager {
         &self.source_dir
     }
 
-    /// codex 扫描的 skill 目录。启用一个 skill 就是往这里放一个指向源目录的软链。
+    /// 旧版安装使用的 codex 扫描根，只做兼容；新装 skill 不再写到这里。
     pub fn linked_dir(&self) -> PathBuf {
         self.codex_home.join("skills")
+    }
+
+    /// Codex Desktop 的一级发现根，新装/更新的 skill 默认软链到这里。
+    pub fn agents_linked_dir(&self) -> PathBuf {
+        self.agents_home.join("skills")
+    }
+
+    /// 全部发现根，固定顺序：codex（旧）在前、agents（新）在后。
+    pub fn linked_dirs(&self) -> Vec<PathBuf> {
+        vec![self.linked_dir(), self.agents_linked_dir()]
+    }
+
+    fn target_dir(&self, target: &str) -> Option<PathBuf> {
+        match target {
+            SKILL_TARGET_CODEX => Some(self.linked_dir()),
+            SKILL_TARGET_AGENTS => Some(self.agents_linked_dir()),
+            _ => None,
+        }
     }
 
     pub fn load_state(&self) -> SkillsState {
@@ -256,7 +317,6 @@ impl SkillsManager {
     /// 把远端清单和本地状态合并成一份列表。`remote` 传空就是纯本地视图。
     pub fn merge_entries(&self, remote: &[RemoteSkill]) -> Vec<SkillEntry> {
         let state = self.load_state();
-        let linked = self.linked_dir();
         let mut entries: BTreeMap<String, SkillEntry> = BTreeMap::new();
 
         for skill in remote {
@@ -270,8 +330,14 @@ impl SkillsManager {
                     repo_key: skill.repo_key.clone(),
                     repo_path: skill.repo_path.clone(),
                     installed: installed.is_some(),
-                    enabled: is_linked(&linked.join(&skill.id)),
+                    enabled: installed
+                        .map(|item| self.is_enabled_in_targets(&skill.id, &item.targets))
+                        .unwrap_or(false),
                     bundled: false,
+                    targets: installed
+                        .map(|item| item.targets.clone())
+                        .unwrap_or_default(),
+                    managed: installed.is_some(),
                     content_hash: installed
                         .map(|item| item.content_hash.clone())
                         .unwrap_or_default(),
@@ -300,8 +366,10 @@ impl SkillsManager {
                 repo_key: installed.repo_key.clone(),
                 repo_path: String::new(),
                 installed: true,
-                enabled: is_linked(&linked.join(id)),
+                enabled: self.is_enabled_in_targets(id, &installed.targets),
                 bundled: false,
+                targets: installed.targets.clone(),
+                managed: true,
                 content_hash: installed.content_hash.clone(),
                 remote_hash: String::new(),
                 update_available: false,
@@ -312,12 +380,77 @@ impl SkillsManager {
             entries.entry(skill.id.clone()).or_insert(skill);
         }
 
+        // `~/.agents/skills` 下没有登记的手工技能：Codex Desktop 实际会读，面板要看得见。
+        // 已托管/已登记的同名条目保持原样；远端清单里未安装的条目用本地实体覆盖。
+        for skill in self.list_local_agents_skills() {
+            entries
+                .entry(skill.id.clone())
+                .and_modify(|existing| {
+                    if !existing.installed {
+                        *existing = skill.clone();
+                    }
+                })
+                .or_insert(skill);
+        }
+
         entries.into_values().collect()
+    }
+
+    /// 已登记 target 根里任一存在链接即视为启用；targets 为空时按 `.agents` 根实际存在兜底。
+    fn is_enabled_in_targets(&self, id: &str, targets: &[String]) -> bool {
+        if targets.iter().any(|target| {
+            self.target_dir(target)
+                .map_or(false, |dir| is_linked(&dir.join(id)))
+        }) {
+            return true;
+        }
+        targets.is_empty() && self.agents_linked_dir().join(id).exists()
     }
 
     /// codex 随包附带的 `.system` skill，只列出来让用户知道有这些，不参与安装。
     fn list_bundled_skills(&self) -> Vec<SkillEntry> {
-        let root = self.linked_dir().join(BUNDLED_SKILLS_DIR);
+        let mut skills = Vec::new();
+        for root in self.linked_dirs() {
+            let root = root.join(BUNDLED_SKILLS_DIR);
+            let Ok(dir) = std::fs::read_dir(&root) else {
+                continue;
+            };
+            for entry in dir.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let Some(id) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                let manifest = path.join(SKILL_MANIFEST_FILE);
+                if !manifest.is_file() {
+                    continue;
+                }
+                let (name, description) = read_skill_manifest(&manifest, id);
+                skills.push(SkillEntry {
+                    id: id.to_string(),
+                    name,
+                    description,
+                    repo_key: String::new(),
+                    repo_path: String::new(),
+                    installed: true,
+                    enabled: true,
+                    bundled: true,
+                    targets: Vec::new(),
+                    managed: false,
+                    content_hash: String::new(),
+                    remote_hash: String::new(),
+                    update_available: false,
+                });
+            }
+        }
+        skills
+    }
+
+    /// `~/.agents/skills` 下未登记的手工技能，按「本地已启用」展示，只允许卸载备份。
+    fn list_local_agents_skills(&self) -> Vec<SkillEntry> {
+        let root = self.agents_linked_dir();
         let Ok(dir) = std::fs::read_dir(&root) else {
             return Vec::new();
         };
@@ -330,6 +463,9 @@ impl SkillsManager {
             let Some(id) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
+            if id == BUNDLED_SKILLS_DIR {
+                continue;
+            }
             let manifest = path.join(SKILL_MANIFEST_FILE);
             if !manifest.is_file() {
                 continue;
@@ -343,7 +479,9 @@ impl SkillsManager {
                 repo_path: String::new(),
                 installed: true,
                 enabled: true,
-                bundled: true,
+                bundled: false,
+                targets: vec![SKILL_TARGET_AGENTS.to_string()],
+                managed: false,
                 content_hash: String::new(),
                 remote_hash: String::new(),
                 update_available: false,
@@ -359,6 +497,37 @@ impl SkillsManager {
         zip_bytes: &[u8],
     ) -> anyhow::Result<SkillsState> {
         validate_skill_id(&skill.id)?;
+        // `.agents` 里已存在同名实体目录/第三方软链时不安装，避免覆盖用户手工技能。
+        let (previous_targets, agents_owned) = {
+            let _guard = self.state_lock.lock().unwrap();
+            let state = self.load_state_unlocked();
+            let installed = state.installed.get(&skill.id);
+            (
+                installed
+                    .map(|item| item.targets.clone())
+                    .unwrap_or_default(),
+                installed
+                    .map(|item| {
+                        item.targets
+                            .iter()
+                            .any(|target| target == SKILL_TARGET_AGENTS)
+                    })
+                    .unwrap_or(false),
+            )
+        };
+        let agents_link = self.agents_linked_dir().join(&skill.id);
+        if let Ok(metadata) = std::fs::symlink_metadata(&agents_link) {
+            let ours = agents_owned
+                || (metadata.file_type().is_symlink()
+                    && link_points_to(&self.source_dir.join(&skill.id), &agents_link));
+            if !ours {
+                anyhow::bail!(
+                    "{} 已存在同名 skill，请先卸载或重命名本地目录再安装：{}",
+                    self.agents_linked_dir().display(),
+                    agents_link.display()
+                );
+            }
+        }
         let staging = self.staging_dir(&skill.id);
         if staging.exists() {
             std::fs::remove_dir_all(&staging)
@@ -399,44 +568,117 @@ impl SkillsManager {
                 repo_key: skill.repo_key.clone(),
                 content_hash: skill.content_hash.clone(),
                 installed_at: current_unix_timestamp_string(),
+                targets: new_skill_targets(),
             },
         );
         self.save_state_unlocked(&state)?;
         drop(_guard);
 
         self.set_enabled(&skill.id, true)?;
+        // 老版本装在 codex 根：更新后切到 agents 主根，并清掉旧根的链接。
+        for old_target in previous_targets {
+            if old_target == SKILL_TARGET_AGENTS {
+                continue;
+            }
+            if let Some(dir) = self.target_dir(&old_target) {
+                remove_link(&dir.join(&skill.id))?;
+            }
+        }
         Ok(self.load_state())
     }
 
-    /// 启用 = 在 `$CODEX_HOME/skills/` 下建一个指向源目录的软链；停用 = 删掉它。
+    /// 启用 = 在登记过的发现根下建一个指向源目录的软链；停用 = 删掉它们。
+    /// codex 根维持旧版接管语义；agents 根只在目标空闲或已是自己的软链时接管。
     pub fn set_enabled(&self, id: &str, enabled: bool) -> anyhow::Result<()> {
         validate_skill_id(id)?;
         let source = self.source_dir.join(id);
-        let link = self.linked_dir().join(id);
+        let _guard = self.state_lock.lock().unwrap();
+        let mut state = self.load_state_unlocked();
+        let targets = state
+            .installed
+            .get(id)
+            .map(|item| item.targets.clone())
+            .unwrap_or_else(default_skill_targets);
+
         if !enabled {
-            return remove_link(&link);
+            for target in &targets {
+                if let Some(dir) = self.target_dir(target) {
+                    remove_link(&dir.join(id))?;
+                }
+            }
+            return Ok(());
         }
+
         if !source.is_dir() {
             anyhow::bail!("skill 源目录不存在：{}", source.display());
         }
-        std::fs::create_dir_all(self.linked_dir())
-            .with_context(|| format!("创建 {} 失败", self.linked_dir().display()))?;
-        remove_link(&link)?;
-        link_or_copy(&source, &link)
+
+        let mut effective: Vec<String> = Vec::new();
+        for target in SKILL_TARGETS {
+            let Some(dir) = self.target_dir(target) else {
+                continue;
+            };
+            let link = dir.join(id);
+            if target == SKILL_TARGET_CODEX {
+                if !targets.iter().any(|item| item == target) {
+                    // agents 主根模型下，新装技能不往 codex 写第二份。
+                    continue;
+                }
+                link_or_copy_into(&source, &dir, &link)?;
+                effective.push(target.to_string());
+            } else if targets.iter().any(|item| item == target) {
+                // 应用登记过 agents 根：软链或 Windows 复制体都可以安全重建。
+                link_or_copy_into(&source, &dir, &link)?;
+                effective.push(target.to_string());
+            } else {
+                let owned_symlink = std::fs::symlink_metadata(&link)
+                    .map(|metadata| {
+                        metadata.file_type().is_symlink() && link_points_to(&source, &link)
+                    })
+                    .unwrap_or(false);
+                if owned_symlink {
+                    link_or_copy_into(&source, &dir, &link)?;
+                    effective.push(target.to_string());
+                }
+                // 其它情况（实体目录/第三方软链）：不动、不接管，也不写重复副本。
+            }
+        }
+
+        if let Some(installed) = state.installed.get_mut(id) {
+            if installed.targets != effective {
+                installed.targets = effective;
+                self.save_state_unlocked(&state)?;
+            }
+        }
+        Ok(())
     }
 
-    /// 卸载：删软链，源目录整体移进备份目录。不做自动轮转删除。
+    /// 卸载：删掉已登记根的链接，SSOT 或本地 `.agents` 目录移进备份目录。
+    /// 本地技能备份带恢复目标标记，恢复时放回 `~/.agents/skills`。
     pub fn uninstall(&self, id: &str) -> anyhow::Result<SkillsState> {
         validate_skill_id(id)?;
-        remove_link(&self.linked_dir().join(id))?;
+        let _guard = self.state_lock.lock().unwrap();
+        let mut state = self.load_state_unlocked();
+        let targets = state
+            .installed
+            .get(id)
+            .map(|item| item.targets.clone())
+            .unwrap_or_default();
+
+        for target in &targets {
+            if let Some(dir) = self.target_dir(target) {
+                remove_link(&dir.join(id))?;
+            }
+        }
+
+        std::fs::create_dir_all(&self.backups_dir)
+            .with_context(|| format!("创建备份目录失败：{}", self.backups_dir.display()))?;
+        let backup = self
+            .backups_dir
+            .join(format!("{id}-{}", current_unix_timestamp_string()));
 
         let source = self.source_dir.join(id);
         if source.is_dir() {
-            std::fs::create_dir_all(&self.backups_dir)
-                .with_context(|| format!("创建备份目录失败：{}", self.backups_dir.display()))?;
-            let backup = self
-                .backups_dir
-                .join(format!("{id}-{}", current_unix_timestamp_string()));
             std::fs::rename(&source, &backup).with_context(|| {
                 format!(
                     "备份 skill 到 {} 失败（源 {}）",
@@ -444,10 +686,28 @@ impl SkillsManager {
                     source.display()
                 )
             })?;
+        } else {
+            let agents_local = self.agents_linked_dir().join(id);
+            if agents_local.is_dir() && !state.installed.contains_key(id) {
+                std::fs::rename(&agents_local, &backup).with_context(|| {
+                    format!(
+                        "备份本地 skill 到 {} 失败（源 {}）",
+                        backup.display(),
+                        agents_local.display()
+                    )
+                })?;
+                let backup_id = backup
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(id);
+                let marker = self
+                    .backups_dir
+                    .join(format!("{backup_id}{BACKUP_RESTORE_TARGET_SUFFIX}"));
+                std::fs::write(&marker, SKILL_TARGET_AGENTS)
+                    .with_context(|| format!("写入恢复目标标记失败：{}", marker.display()))?;
+            }
         }
 
-        let _guard = self.state_lock.lock().unwrap();
-        let mut state = self.load_state_unlocked();
         state.installed.remove(id);
         self.save_state_unlocked(&state)?;
         Ok(state)
@@ -480,7 +740,7 @@ impl SkillsManager {
         backups
     }
 
-    /// 从备份恢复：目录移回 SSOT 并重新建链。
+    /// 从备份恢复：带本地标记的放回 `~/.agents/skills`，其余移回 SSOT 并重新建链。
     pub fn restore_backup(&self, backup_id: &str) -> anyhow::Result<SkillsState> {
         validate_skill_id(backup_id)?;
         let backup = self.backups_dir.join(backup_id);
@@ -489,6 +749,30 @@ impl SkillsManager {
         }
         let (skill_id, _) = split_backup_id(backup_id);
         validate_skill_id(&skill_id)?;
+
+        let marker = self
+            .backups_dir
+            .join(format!("{backup_id}{BACKUP_RESTORE_TARGET_SUFFIX}"));
+        let restore_target = std::fs::read_to_string(&marker)
+            .ok()
+            .map(|text| text.trim().to_string());
+
+        if restore_target.as_deref() == Some(SKILL_TARGET_AGENTS) {
+            let destination = self.agents_linked_dir().join(&skill_id);
+            if destination.exists() {
+                anyhow::bail!("{skill_id} 已在 ~/.agents/skills 下存在，请先卸载再恢复");
+            }
+            if let Some(parent) = destination.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("创建目录失败：{}", parent.display()))?;
+            }
+            std::fs::rename(&backup, &destination)
+                .with_context(|| format!("恢复到 {} 失败", destination.display()))?;
+            std::fs::remove_file(&marker)
+                .with_context(|| format!("清理恢复目标标记失败：{}", marker.display()))?;
+            return Ok(self.load_state());
+        }
+
         let destination = self.source_dir.join(&skill_id);
         if destination.exists() {
             anyhow::bail!("{skill_id} 已经装着了，先卸载再从备份恢复");
@@ -512,6 +796,7 @@ impl SkillsManager {
                     repo_key: String::new(),
                     content_hash: String::new(),
                     installed_at: current_unix_timestamp_string(),
+                    targets: new_skill_targets(),
                 },
             );
             self.save_state_unlocked(&state)?;
@@ -527,6 +812,13 @@ impl SkillsManager {
         if backup.is_dir() {
             std::fs::remove_dir_all(&backup)
                 .with_context(|| format!("删除备份失败：{}", backup.display()))?;
+        }
+        let marker = self
+            .backups_dir
+            .join(format!("{backup_id}{BACKUP_RESTORE_TARGET_SUFFIX}"));
+        if marker.is_file() {
+            std::fs::remove_file(&marker)
+                .with_context(|| format!("删除恢复目标标记失败：{}", marker.display()))?;
         }
         Ok(self.list_backups())
     }
@@ -958,6 +1250,21 @@ pub async fn download_repo_zip(repo: &SkillRepo) -> anyhow::Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
+/// 先确保根目录存在、清掉旧链接，再建新链接/复制体。
+fn link_or_copy_into(source: &Path, dir: &Path, link: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("创建 {} 失败", dir.display()))?;
+    remove_link(link)?;
+    link_or_copy(source, link)
+}
+
+/// 判断一个链接是否指向 skill 源目录（应用自己建的软链）。
+fn link_points_to(source: &Path, link: &Path) -> bool {
+    let (Ok(source), Ok(target)) = (std::fs::canonicalize(source), std::fs::canonicalize(link))
+    else {
+        return false;
+    };
+    source == target
+}
 /// 软链优先，失败回退复制。Windows 上建目录软链要开发者模式或管理员权限，
 /// 拿不到就退化成复制——功能一样，只是更新时要重装。
 fn link_or_copy(source: &Path, link: &Path) -> anyhow::Result<()> {
@@ -1070,11 +1377,12 @@ mod tests {
     use std::io::Write;
 
     fn manager(temp: &tempfile::TempDir) -> SkillsManager {
-        SkillsManager::new(
+        SkillsManager::new_with_agents(
             temp.path().join("skills"),
             temp.path().join("skill-backups"),
             temp.path().join("skills.json"),
             temp.path().join("codex-home"),
+            temp.path().join("agents-home"),
         )
     }
 
@@ -1209,7 +1517,7 @@ mod tests {
     }
 
     #[test]
-    fn install_writes_source_dir_and_links_into_codex_home() {
+    fn install_writes_source_dir_and_links_into_agents_root() {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         let zip = repo_zip(&[(
@@ -1225,6 +1533,7 @@ mod tests {
             .unwrap();
 
         assert!(state.installed.contains_key("alpha"));
+        assert_eq!(state.installed["alpha"].targets, vec!["agents"]);
         assert!(
             manager
                 .source_dir()
@@ -1232,14 +1541,15 @@ mod tests {
                 .join("SKILL.md")
                 .is_file()
         );
-        // codex 靠这个路径发现 skill
+        // Codex Desktop 靠 `~/.agents/skills` 发现新装 skill；不往 `.codex` 写第二份。
         assert!(
             manager
-                .linked_dir()
+                .agents_linked_dir()
                 .join("alpha")
                 .join("SKILL.md")
                 .is_file()
         );
+        assert!(!manager.linked_dir().join("alpha").exists());
         // 暂存目录不能留下
         let leftovers = std::fs::read_dir(manager.source_dir())
             .unwrap()
@@ -1259,7 +1569,7 @@ mod tests {
             .unwrap();
 
         manager.set_enabled("alpha", false).unwrap();
-        assert!(!manager.linked_dir().join("alpha").exists());
+        assert!(!manager.agents_linked_dir().join("alpha").exists());
         assert!(manager.source_dir().join("alpha").is_dir());
         // 停用只能删链接：如果误用 remove_dir_all 顺着软链删下去，
         // SSOT 里的真实文件会一起没掉，停用就成了毁数据。
@@ -1274,7 +1584,7 @@ mod tests {
         manager.set_enabled("alpha", true).unwrap();
         assert!(
             manager
-                .linked_dir()
+                .agents_linked_dir()
                 .join("alpha")
                 .join("SKILL.md")
                 .is_file()
@@ -1296,11 +1606,11 @@ mod tests {
 
         for _ in 0..3 {
             manager.set_enabled("alpha", false).unwrap();
-            assert!(!manager.linked_dir().join("alpha").exists());
+            assert!(!manager.agents_linked_dir().join("alpha").exists());
             manager.set_enabled("alpha", true).unwrap();
             assert!(
                 manager
-                    .linked_dir()
+                    .agents_linked_dir()
                     .join("alpha")
                     .join("SKILL.md")
                     .is_file()
@@ -1331,7 +1641,7 @@ mod tests {
         let state = manager.uninstall("alpha").unwrap();
         assert!(!state.installed.contains_key("alpha"));
         assert!(!manager.source_dir().join("alpha").exists());
-        assert!(!manager.linked_dir().join("alpha").exists());
+        assert!(!manager.agents_linked_dir().join("alpha").exists());
 
         let backups = manager.list_backups();
         assert_eq!(backups.len(), 1);
@@ -1346,7 +1656,129 @@ mod tests {
                 .join("SKILL.md")
                 .is_file()
         );
+        assert!(
+            manager
+                .agents_linked_dir()
+                .join("alpha")
+                .join("SKILL.md")
+                .is_file()
+        );
         assert!(manager.list_backups().is_empty());
+    }
+
+    #[test]
+    fn install_declines_when_agents_has_a_manual_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = manager(&temp);
+        let manual = manager.agents_linked_dir().join("alpha");
+        std::fs::create_dir_all(&manual).unwrap();
+        std::fs::write(manual.join(SKILL_MANIFEST_FILE), "---\nname: alpha\n---\n").unwrap();
+        std::fs::write(manual.join("manual.txt"), "mine\n").unwrap();
+
+        let error = manager
+            .install_from_zip(
+                &sample_skill("alpha", "alpha", "hash-1"),
+                &repo_zip(&[("kit-main/alpha/SKILL.md", "---\nname: alpha\n---\n")]),
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("已存在同名"));
+        assert!(
+            manager
+                .agents_linked_dir()
+                .join("alpha")
+                .join("manual.txt")
+                .is_file()
+        );
+        assert!(!manager.source_dir().join("alpha").exists());
+    }
+
+    #[test]
+    fn legacy_codex_install_stays_until_reinstalled() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = manager(&temp);
+        let source = manager.source_dir().join("alpha");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join(SKILL_MANIFEST_FILE), "---\nname: alpha\n---\n").unwrap();
+        // 老 state 没有 `targets` 字段，serde 缺省为 codex。
+        std::fs::write(
+            temp.path().join("skills.json"),
+            serde_json::to_string_pretty(&json!({
+                "repos": [],
+                "installed": {
+                    "alpha": {"id": "alpha", "name": "alpha", "contentHash": "h", "installedAt": "1"}
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        manager.set_enabled("alpha", true).unwrap();
+        let before = manager.merge_entries(&[]);
+        let legacy = before.iter().find(|entry| entry.id == "alpha").unwrap();
+        assert!(legacy.managed);
+        assert!(legacy.enabled);
+        assert_eq!(legacy.targets, vec!["codex"]);
+        assert!(
+            manager
+                .linked_dir()
+                .join("alpha")
+                .join(SKILL_MANIFEST_FILE)
+                .is_file()
+        );
+
+        // 「更新」等价于重装：切到 agents 主根并清掉旧 codex 链接。
+        manager
+            .install_from_zip(
+                &sample_skill("alpha", "alpha", "hash-2"),
+                &repo_zip(&[("kit-main/alpha/SKILL.md", "---\nname: alpha\n---\n")]),
+            )
+            .unwrap();
+        assert!(
+            manager
+                .agents_linked_dir()
+                .join("alpha")
+                .join(SKILL_MANIFEST_FILE)
+                .is_file()
+        );
+        assert!(!manager.linked_dir().join("alpha").exists());
+    }
+
+    #[test]
+    fn local_agents_skill_is_listed_and_restores_in_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = manager(&temp);
+        let local = manager.agents_linked_dir().join("local-demo");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(
+            local.join(SKILL_MANIFEST_FILE),
+            "---\nname: local-demo\ndescription: 本地\n---\n",
+        )
+        .unwrap();
+
+        let entries = manager.merge_entries(&[]);
+        let entry = entries
+            .iter()
+            .find(|entry| entry.id == "local-demo")
+            .unwrap();
+        assert!(entry.installed);
+        assert!(entry.enabled);
+        assert!(!entry.managed);
+        assert_eq!(entry.targets, vec!["agents"]);
+
+        manager.uninstall("local-demo").unwrap();
+        assert!(!manager.agents_linked_dir().join("local-demo").exists());
+        let backups = manager.list_backups();
+        assert_eq!(backups.len(), 1);
+
+        manager.restore_backup(&backups[0].id).unwrap();
+        assert!(
+            manager
+                .agents_linked_dir()
+                .join("local-demo")
+                .join(SKILL_MANIFEST_FILE)
+                .is_file()
+        );
     }
 
     #[test]

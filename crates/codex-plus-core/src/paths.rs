@@ -11,6 +11,7 @@ const PENDING_REMOTE_CONTROL_RECOVERY_FILE: &str = "pending-remote-control-recov
 const SKILLS_STATE_FILE: &str = "skills.json";
 const SKILLS_DIR: &str = "skills";
 const SKILL_BACKUPS_DIR: &str = "skill-backups";
+const AGENTS_HOME_DIR: &str = ".agents";
 
 pub fn default_app_state_dir() -> PathBuf {
     if let Some(home_dir) = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) {
@@ -60,6 +61,20 @@ pub fn default_skills_state_path() -> PathBuf {
 /// 卸载 skill 时把源目录整体移到这里，方便反悔。不自动轮转删除。
 pub fn default_skill_backups_dir() -> PathBuf {
     default_app_state_dir().join(SKILL_BACKUPS_DIR)
+}
+
+/// Codex Desktop 另外读取的 agents 主目录，固定取用户主目录下的 `.agents`。
+pub fn default_agents_home_dir() -> PathBuf {
+    if let Some(home_dir) = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) {
+        return home_dir.join(AGENTS_HOME_DIR);
+    }
+
+    PathBuf::from(AGENTS_HOME_DIR)
+}
+
+/// `.agents` 下的技能发现根，新装/更新的 skill 默认软链到这里。
+pub fn default_agents_skills_dir() -> PathBuf {
+    default_agents_home_dir().join(SKILLS_DIR)
 }
 
 fn settings_path_for_tests() -> Option<PathBuf> {
@@ -136,5 +151,12 @@ mod tests {
         let path = default_pending_remote_control_recovery_path();
 
         assert!(path.ends_with(".codex-session-delete/pending-remote-control-recovery.json"));
+    }
+
+    #[test]
+    fn default_agents_skills_dir_uses_home_agents_directory() {
+        let dir = default_agents_skills_dir();
+
+        assert!(dir.ends_with(".agents/skills"));
     }
 }

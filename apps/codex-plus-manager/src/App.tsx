@@ -20,13 +20,15 @@ import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowLeftRight,
   Bell,
   BookOpen,
-  Bot,
   CheckCircle2,
   ChevronDown,
   Camera,
   CircleArrowUp,
+  CircleHelp,
+  CirclePlus,
   Copy,
   Download,
   Edit3,
@@ -42,17 +44,18 @@ import {
   LayoutGrid,
   LayoutDashboard,
   List,
-  Palette,
   Play,
   MessageCircle,
   MoreHorizontal,
   PackageOpen,
   FileCode2,
+  FileText,
   Moon,
   Network,
   Power,
   PowerOff,
   Plus,
+  PencilLine,
   RefreshCw,
   RotateCcw,
   Rocket,
@@ -60,14 +63,17 @@ import {
   Save,
   Search,
   Settings,
+  Settings2,
   ShieldCheck,
   ShieldAlert,
+  Sparkles,
   Star,
   Store,
   Stethoscope,
   Sun,
   TestTube,
   Trash2,
+  Upload,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -105,50 +111,15 @@ import { relayAuthForLiveDraft, shouldBackfillRelayProfileBeforeSwitch } from ".
 import { resolveProviderName } from "./provider-name";
 import { resolveProviderSyncCompletion } from "./provider-sync-flow";
 import { resolveLaunchStatus } from "./launch-status";
-import {
-  defaultDreamSkinTheme,
-  defaultDreamSkinColors,
-  isDreamSkinDraftDirty,
-  normalizeDreamSkinTheme,
-  type DreamSkinCheck,
-  type DreamSkinColors,
-  type DreamSkinCommunityResult,
-  type DreamSkinCommunityTheme,
-  type DreamSkinImageResult,
-  type DreamSkinMarketResult,
-  type DreamSkinMarketTheme,
-  type DreamSkinRuntimeResult,
-  type DreamSkinThemeActivationResult,
-  type DreamSkinThemeConfig,
-  type DreamSkinThemeDraft,
-  type DreamSkinThemeDraftResult,
-  type DreamSkinThemeLibrary,
-  type DreamSkinThemeLibraryResult,
-  type DreamSkinThemeSummary,
-  type DreamSkinVerificationResult,
-} from "./dream-skin";
 import { getLanguage, t, tf, toggleLanguage } from "@/i18n";
+import { readPromptCatalogCache, syncCodexXPromptCatalog, type PromptCatalogItem } from "./prompt-catalog";
 
 const isWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent);
-const dreamSkinWindowsPreviewUrl = new URL("../../../assets/inject/upstream/dream-skin/windows/dream-reference.jpg", import.meta.url).href;
-const dreamSkinMacPreviewUrl = new URL("../../../assets/inject/upstream/dream-skin/macos/portal-hero.png", import.meta.url).href;
-const dreamSkinCompanionDataUrlLimit = 240_000;
-const dreamSkinCompanionMimeTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
 type Status = "ok" | "failed" | "not_implemented" | "not_checked" | string;
 
 type CommandResult<T> = T & {
   status: Status;
   message: string;
-};
-
-type PendingDreamSkinCommunityResult = CommandResult<{ versionId: string }>;
-
-type PendingDreamSkinRestart = {
-  currentThemeKey: string | null;
-  currentThemeName: string;
-  pendingThemeKey: string;
-  pendingThemeName: string;
 };
 
 type PathState = {
@@ -225,34 +196,14 @@ type BackendSettings = {
   codexAppThreadIdBadge: boolean;
   codexAppConversationView: boolean;
   codexAppThreadScrollRestore: boolean;
-  codexAppZedRemoteOpen: boolean;
-  zedRemoteOpenStrategy: ZedOpenStrategy;
-  zedRemoteProjectRegistryEnabled: boolean;
-  zedRemoteSyncToZedSettings: boolean;
-  codexAppUpstreamWorktreeCreate: boolean;
   codexAppNativeMenuPlacement: boolean;
   codexAppNativeMenuLocalization: boolean;
   codexAppServiceTierControls: boolean;
   codexAppPetRealMouseLook: boolean;
-  codexAppStepwiseEnabled: boolean;
-  codexAppStepwiseDirectSend: boolean;
-  codexAppStepwiseBaseUrl: string;
-  codexAppStepwiseApiKey: string;
-  codexAppStepwiseApiKeyEnv: string;
-  codexAppStepwiseModel: string;
-  codexAppStepwiseMaxItems: number;
-  codexAppStepwiseMaxInputChars: number;
-  codexAppStepwiseMaxOutputTokens: number;
-  codexAppStepwiseTimeoutMs: number;
   codexAppImageOverlayEnabled: boolean;
   codexAppImageOverlayPath: string;
   codexAppImageOverlayOpacity: number;
   codexAppImageOverlayFitMode: ImageOverlayFitMode;
-  codexAppDreamSkinEnabled: boolean;
-  codexAppDreamSkinPaused: boolean;
-  codexAppDreamSkinTheme: string;
-  codexAppDreamSkinThemeConfig: DreamSkinThemeConfig;
-  codexAppDreamSkinImagePath: string;
   codexGoalsEnabled: boolean;
   weixinConnectEnabled: boolean;
   weixinConnectBaseUrl: string;
@@ -276,7 +227,6 @@ type BackendSettings = {
   relayTestModel: string;
 };
 
-type ZedOpenStrategy = "addToFocusedWorkspace" | "reuseWindow" | "newWindow" | "default";
 type LaunchMode = "patch" | "relay";
 type ImageOverlayFitMode = "fill" | "fit" | "stretch" | "tile" | "center";
 
@@ -395,7 +345,7 @@ type RelayProtocol = "responses" | "chatCompletions";
 type RelayMode = "official" | "mixedApi" | "pureApi" | "aggregate";
 type RelaySessionProvider = "custom" | "openai";
 const CHAT_UPSTREAM_BASE_URL_KEY = "codex_plus_chat_base_url";
-const SCRIPT_MARKET_REPOSITORY_URL = "https://github.com/BigPizzaV3/CodexPlusPlusScriptMarket";
+const SCRIPT_MARKET_REPOSITORY_URL = "https://github.com/payAgain/CodexPlusPlusScriptMarket";
 
 type UserScriptInventory = {
   enabled?: boolean;
@@ -419,53 +369,6 @@ type SettingsResult = CommandResult<{
   settings_path: string;
   user_scripts: UserScriptInventory;
 }>;
-
-type GrokApiBackend = "responses" | "chat_completions" | "messages";
-
-type GrokModelConfig = {
-  alias: string;
-  model: string;
-  name: string;
-  baseUrl: string;
-  apiBackend: GrokApiBackend;
-  contextWindow: number | null;
-  apiKeyConfigured: boolean;
-};
-
-type GrokConfigResult = CommandResult<{
-  grokHome: string;
-  configPath: string;
-  configExists: boolean;
-  cliPath: string | null;
-  cliInstalled: boolean;
-  revision: string;
-  defaultModel: string;
-  modelsBaseUrl: string;
-  models: GrokModelConfig[];
-}>;
-
-type GrokModelInput = {
-  sourceAlias: string;
-  alias: string;
-  model: string;
-  name: string;
-  baseUrl: string;
-  apiBackend: GrokApiBackend;
-  contextWindow: number | null;
-  apiKeyUpdate: string;
-  removeApiKey: boolean;
-};
-
-type SaveGrokConfigRequest = {
-  revision: string;
-  defaultModel: string;
-  modelsBaseUrl: string;
-  models: GrokModelInput[];
-};
-
-type SaveGrokConfigResult = GrokConfigResult & {
-  backupPath: string | null;
-};
 
 type WeixinConnectStatusResult = CommandResult<{
   state: string;
@@ -540,31 +443,6 @@ type PendingSessionShareResult = CommandResult<{
   url: string | null;
 }>;
 
-type ZedRemoteProject = {
-  id: string;
-  label: string;
-  hostId: string;
-  ssh: {
-    user: string;
-    host: string;
-    port: number | null;
-  };
-  path: string;
-  url: string;
-  source: "currentThread" | "codexRemoteProject" | "threadWorkspaceHint" | "sqliteThreadCwd" | "recent" | string;
-  lastOpenedAtMs: number | null;
-  isCurrent: boolean;
-};
-
-type ZedRemoteProjectsResult = CommandResult<{
-  projects: ZedRemoteProject[];
-}>;
-
-type ZedRemoteOpenResult = CommandResult<{
-  url: string;
-  strategy: ZedOpenStrategy;
-}>;
-
 type DeleteLocalSessionResult = CommandResult<{
   status: string;
   session_id: string;
@@ -604,10 +482,6 @@ type RelayProfileTestResult = CommandResult<{
   responsePreview: string;
 }>;
 
-type StepwiseTestResult = CommandResult<{
-  itemCount: number;
-  error: string;
-}>;
 
 type RelayProfileModelsResult = CommandResult<{
   models: string[];
@@ -812,22 +686,6 @@ type UpdateResult = CommandResult<{
   progress?: number;
 }>;
 
-type AdItem = {
-  id?: string;
-  type: "sponsor" | "normal" | string;
-  title: string;
-  description: string;
-  url: string;
-  image?: string;
-  highlights?: string[];
-  expires_at?: string;
-};
-
-type AdsResult = CommandResult<{
-  version: number;
-  ads: AdItem[];
-}>;
-
 type ScriptMarketItem = {
   id: string;
   name: string;
@@ -854,6 +712,23 @@ type ScriptMarketResult = CommandResult<{
   user_scripts: UserScriptInventory;
 }>;
 
+type LiveConfigSnapshot = {
+  path: string;
+  exists: boolean;
+  text: string;
+  sha256: string;
+  parseStatus: string;
+  summary: { rootKeys: string[]; tables: string[] };
+};
+
+type LiveConfigResult = CommandResult<{ config: LiveConfigSnapshot }>;
+type LiveConfigPreview = {
+  parseStatus: string;
+  error: string | null;
+  summary: { rootKeys: string[]; tables: string[] };
+};
+type LiveConfigPreviewResult = CommandResult<{ preview: LiveConfigPreview }>;
+
 type SkillRepo = {
   owner: string;
   name: string;
@@ -874,6 +749,8 @@ type SkillEntry = {
   contentHash: string;
   remoteHash: string;
   updateAvailable: boolean;
+  targets: string[];
+  managed: boolean;
 };
 
 type SkillBackup = {
@@ -890,6 +767,7 @@ type SkillsResult = CommandResult<{
   repoErrors: string[];
   skillsDir: string;
   codexSkillsDir: string;
+  agentsSkillsDir: string;
 }>;
 
 /** 仓库源的稳定标识，必须和 Rust 侧 `SkillRepo::key()` 生成的一致。 */
@@ -965,22 +843,20 @@ type StartupResult = CommandResult<{
   showUpdate: boolean;
 }>;
 
-type Route = "overview" | "relay" | "grok" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
+type Route = "overview" | "relay" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "userScripts" | "prompts" | "toml" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
   { id: "overview", label: t("概览"), icon: LayoutDashboard },
   { id: "relay", label: t("供应商配置"), icon: KeyRound },
-  { id: "grok", label: t("Grok 配置"), icon: Bot },
   { id: "sessions", label: t("会话管理"), icon: MessageCircle },
   { id: "context", label: t("MCP&插件"), icon: Network },
   { id: "weixin", label: t("微信连接"), icon: ScanLine },
   { id: "enhance", label: t("Codex增强"), icon: Hammer },
-  { id: "dreamSkin", label: t("皮肤管理"), icon: Palette },
-  { id: "zedRemote", label: t("Zed 远程项目"), icon: ExternalLink },
   { id: "skills", label: t("Skills 技能"), icon: BookOpen },
+  { id: "prompts", label: t("指令提示词"), icon: MessageCircle },
   { id: "userScripts", label: t("脚本市场"), icon: FileCode2 },
-  { id: "recommendations", label: t("推荐内容"), icon: ExternalLink },
+  { id: "toml", label: "TOML", icon: FileCode2 },
   { id: "maintenance", label: t("安装维护"), icon: Wrench },
   { id: "about", label: t("关于"), icon: Info },
   { id: "settings", label: t("设置"), icon: Settings },
@@ -990,15 +866,15 @@ const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string
 const navigationSections: Array<{ label: string; routes: Route[]; placement?: "bottom" }> = [
   {
     label: t("工作区"),
-    routes: ["overview", "relay", "grok", "sessions", "context"],
+    routes: ["overview", "relay", "sessions", "context"],
   },
   {
     label: t("扩展"),
-    routes: ["skills", "weixin", "enhance", "dreamSkin", "zedRemote", "userScripts"],
+    routes: ["skills", "prompts", "weixin", "enhance", "userScripts", "toml"],
   },
   {
     label: t("系统"),
-    routes: ["recommendations", "maintenance", "about", "settings"],
+    routes: ["maintenance", "about", "settings"],
     placement: "bottom",
   },
 ];
@@ -1023,34 +899,14 @@ const defaultSettings: BackendSettings = {
   codexAppThreadIdBadge: false,
   codexAppConversationView: false,
   codexAppThreadScrollRestore: true,
-  codexAppZedRemoteOpen: true,
-  zedRemoteOpenStrategy: "addToFocusedWorkspace",
-  zedRemoteProjectRegistryEnabled: true,
-  zedRemoteSyncToZedSettings: false,
-  codexAppUpstreamWorktreeCreate: true,
   codexAppNativeMenuPlacement: true,
   codexAppNativeMenuLocalization: true,
   codexAppServiceTierControls: false,
   codexAppPetRealMouseLook: false,
-  codexAppStepwiseEnabled: false,
-  codexAppStepwiseDirectSend: false,
-  codexAppStepwiseBaseUrl: "",
-  codexAppStepwiseApiKey: "",
-  codexAppStepwiseApiKeyEnv: "CODEX_STEPWISE_API_KEY",
-  codexAppStepwiseModel: "",
-  codexAppStepwiseMaxItems: 6,
-  codexAppStepwiseMaxInputChars: 6000,
-  codexAppStepwiseMaxOutputTokens: 500,
-  codexAppStepwiseTimeoutMs: 8000,
   codexAppImageOverlayEnabled: false,
   codexAppImageOverlayPath: "",
   codexAppImageOverlayOpacity: 35,
   codexAppImageOverlayFitMode: "fit",
-  codexAppDreamSkinEnabled: false,
-  codexAppDreamSkinPaused: false,
-  codexAppDreamSkinTheme: "pink",
-  codexAppDreamSkinThemeConfig: defaultDreamSkinTheme(),
-  codexAppDreamSkinImagePath: "",
   codexGoalsEnabled: false,
   weixinConnectEnabled: false,
   weixinConnectBaseUrl: "https://ilinkai.weixin.qq.com",
@@ -1127,36 +983,22 @@ export function App() {
   const [envConflicts, setEnvConflicts] = useState<EnvConflictsResult | null>(null);
   const [relayEnvironment, setRelayEnvironment] = useState<RelayEnvironmentResult | null>(null);
   const [ccsProviders, setCcsProviders] = useState<CcsProvidersResult | null>(null);
-  const [grokConfig, setGrokConfig] = useState<GrokConfigResult | null>(null);
   const [pendingProviderImport, setPendingProviderImport] = useState<ProviderImportRequest | null>(null);
   const [localSessions, setLocalSessions] = useState<LocalSessionsResult | null>(null);
   const [sessionShareUrl, setSessionShareUrl] = useState("");
-  const [zedRemoteProjects, setZedRemoteProjects] = useState<ZedRemoteProjectsResult | null>(null);
   const [liveContextEntries, setLiveContextEntries] = useState<CodexContextEntries | null>(null);
   const [logs, setLogs] = useState<LogsResult | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [watcher, setWatcher] = useState<WatcherResult | null>(null);
-  const [dreamSkinStatus, setDreamSkinStatus] = useState<DreamSkinRuntimeResult | null>(null);
-  const [dreamSkinVerification, setDreamSkinVerification] = useState<DreamSkinVerificationResult | null>(null);
-  const [dreamSkinLibrary, setDreamSkinLibrary] = useState<DreamSkinThemeLibrary | null>(null);
-  const [dreamSkinMarket, setDreamSkinMarket] = useState<DreamSkinMarketResult | null>(null);
-  const [dreamSkinCommunity, setDreamSkinCommunity] = useState<DreamSkinCommunityResult | null>(null);
-  const [pendingDreamSkinCommunity, setPendingDreamSkinCommunity] = useState("");
-  const [selectedDreamSkinTheme, setSelectedDreamSkinTheme] = useState("builtin");
-  const [savedDreamSkinThemeDraft, setSavedDreamSkinThemeDraft] = useState<DreamSkinThemeDraft | null>(null);
-  const [dreamSkinThemeDraft, setDreamSkinThemeDraft] = useState<DreamSkinThemeDraft | null>(null);
-  const [pendingDreamSkinRestart, setPendingDreamSkinRestart] = useState<PendingDreamSkinRestart | null>(null);
-  const [dreamSkinUnsavedDialog, setDreamSkinUnsavedDialog] = useState(false);
-  const dreamSkinPendingActionRef = useRef<(() => void) | null>(null);
   const [update, setUpdate] = useState<UpdateResult | null>(null);
   const [updateInstallProgress, setUpdateInstallProgress] = useState<TaskProgress>({
     active: false,
     percent: 0,
     message: t("尚未运行安装包更新。"),
   });
-  const [ads, setAds] = useState<AdsResult | null>(null);
   const [scriptMarket, setScriptMarket] = useState<ScriptMarketResult | null>(null);
   const [skills, setSkills] = useState<SkillsResult | null>(null);
+  const [liveConfig, setLiveConfig] = useState<LiveConfigResult | null>(null);
   const [skillBusyId, setSkillBusyId] = useState<string | null>(null);
   const [launchForm, setLaunchForm] = useState({
     appPath: "",
@@ -1186,11 +1028,6 @@ export function App() {
   const [selectedProviderSyncTarget, setSelectedProviderSyncTarget] = useState("");
   const [removeOwnedData, setRemoveOwnedData] = useState(false);
   const [relaySwitching, setRelaySwitching] = useState(false);
-  const dreamSkinDraftDirty = Boolean(
-    savedDreamSkinThemeDraft
-      && dreamSkinThemeDraft
-      && isDreamSkinDraftDirty(savedDreamSkinThemeDraft, dreamSkinThemeDraft),
-  );
   const settingsDirty = useMemo(
     () => Boolean(settings && !backendSettingsEqual(settingsForm, settings.settings)),
     [settings, settingsForm],
@@ -1251,25 +1088,6 @@ export function App() {
     return result;
   };
 
-  const dreamSkinRequest = (screenshotPath?: string) => ({
-    request: {
-      debugPort: overview?.latest_launch?.debug_port ?? parsePort(launchForm.debugPort, 9229),
-      helperPort: overview?.latest_launch?.helper_port ?? parsePort(launchForm.helperPort, 57321),
-      screenshotPath: screenshotPath || null,
-    },
-  });
-
-  const refreshDreamSkinStatus = async (silent = false) => {
-    const result = await run(() => call<DreamSkinRuntimeResult>("dream_skin_status", dreamSkinRequest()));
-    if (result) {
-      setDreamSkinStatus(result);
-      if (!silent || !isSuccessStatus(result.status)) {
-        showResultNotice(t("Dream Skin 状态"), result, { silentSuccess: true });
-      }
-    }
-    return result;
-  };
-
   const refreshScriptMarket = async (silent = false) => {
     const result = await run(() => call<ScriptMarketResult>("refresh_script_market"));
     if (result) {
@@ -1277,6 +1095,22 @@ export function App() {
       setSettings((current) => (current ? { ...current, user_scripts: result.user_scripts } : current));
       if (!silent || !isSuccessStatus(result.status)) showResultNotice(t("脚本市场"), result, { silentSuccess: true });
     }
+  };
+
+  const refreshLiveConfig = async (silent = false) => {
+    const result = await run(() => call<LiveConfigResult>("read_live_config"));
+    if (result) {
+      setLiveConfig(result);
+      if (!silent) showResultNotice(t("Live TOML"), result, { silentSuccess: true });
+    }
+    return result;
+  };
+
+  const previewLiveConfig = async (text: string) => {
+    const result = await run(() =>
+      call<LiveConfigPreviewResult>("preview_live_config", { request: { text } }),
+    );
+    return result;
   };
 
   const refreshUserScriptInventory = async () => {
@@ -1409,29 +1243,6 @@ export function App() {
       if (!silent) showResultNotice(t("配置文件"), result, { silentSuccess: true });
     }
     return result;
-  };
-
-  const refreshGrokConfig = async (silent = false) => {
-    const result = await run(() => call<GrokConfigResult>("load_grok_config"));
-    if (!result) return null;
-    if (isSuccessStatus(result.status)) {
-      setGrokConfig(result);
-      if (!silent) showResultNotice(t("Grok 配置"), result, { silentSuccess: true });
-    } else {
-      showResultNotice(t("Grok 配置"), result);
-    }
-    return result;
-  };
-
-  const saveGrokConfig = async (request: SaveGrokConfigRequest) => {
-    const result = await run(() => call<SaveGrokConfigResult>("save_grok_config", { request }));
-    if (!result) return null;
-    showResultNotice(t("Grok 配置"), result);
-    if (isSuccessStatus(result.status)) {
-      setGrokConfig(result);
-      return result;
-    }
-    return null;
   };
 
   const refreshEnvConflicts = async (silent = false) => {
@@ -1598,44 +1409,6 @@ export function App() {
     }
   };
 
-  const refreshZedRemoteProjects = async (silent = false) => {
-    const result = await run(() => call<ZedRemoteProjectsResult>("list_zed_remote_projects"));
-    if (result) {
-      setZedRemoteProjects(result);
-      if (!silent || !isSuccessStatus(result.status)) showResultNotice(t("Zed 远程项目"), result, { silentSuccess: true });
-    }
-    return result;
-  };
-
-  const openZedRemoteProject = async (
-    project: ZedRemoteProject,
-    strategy: ZedOpenStrategy = settingsForm.zedRemoteOpenStrategy || "addToFocusedWorkspace",
-  ) => {
-    const result = await run(() =>
-      call<ZedRemoteOpenResult>("open_zed_remote", {
-        payload: {
-          ssh: project.ssh,
-          hostId: project.hostId,
-          path: project.path,
-          strategy,
-          remember: settingsForm.zedRemoteProjectRegistryEnabled !== false,
-        },
-      }),
-    );
-    if (result) {
-      showResultNotice(t("Zed 远程打开"), result);
-      await refreshZedRemoteProjects(true);
-    }
-  };
-
-  const forgetZedRemoteProject = async (project: ZedRemoteProject) => {
-    const result = await run(() => call<ZedRemoteProjectsResult>("forget_zed_remote_project", { id: project.id }));
-    if (result) {
-      setZedRemoteProjects(result);
-      showResultNotice(t("Zed 远程项目"), result);
-    }
-  };
-
   const requestDeleteLocalSession = (session: LocalSession) =>
     call<DeleteLocalSessionResult>("delete_local_session", {
       request: { sessionId: session.id, title: session.title, dbPath: session.dbPath },
@@ -1651,375 +1424,6 @@ export function App() {
         resolve,
       });
     });
-
-  const setDreamSkinDraftSelection = (
-    key: string,
-    draft: DreamSkinThemeDraft,
-  ) => {
-    setSelectedDreamSkinTheme(key);
-    setSavedDreamSkinThemeDraft(draft);
-    setDreamSkinThemeDraft(draft);
-  };
-
-  const refreshDreamSkinLibrary = async (silent = false) => {
-    const result = await run(() => call<DreamSkinThemeLibraryResult>("list_dream_skin_themes"));
-    if (!result) return null;
-    const library: DreamSkinThemeLibrary = {
-      themes: result.themes,
-      activeDraft: result.activeDraft,
-    };
-    setDreamSkinLibrary(library);
-    const active = library.themes.find((item) => item.active) ?? library.themes[0];
-    if (active) {
-      const draft = active.builtin
-        ? { config: defaultDreamSkinTheme(), imagePath: "", builtin: true }
-        : library.activeDraft;
-      setDreamSkinDraftSelection(active.key, draft);
-    }
-    if (!silent && !isSuccessStatus(result.status)) {
-      showResultNotice(t("主题库"), result);
-    }
-    return library;
-  };
-
-  const refreshDreamSkinMarket = async (silent = false) => {
-    const result = await run(() => call<DreamSkinMarketResult>("refresh_dream_skin_market"));
-    if (result) {
-      setDreamSkinMarket(result);
-      if (!silent || !isSuccessStatus(result.status)) {
-        showResultNotice(t("主题市场"), result, { silentSuccess: true });
-      }
-    }
-    return result;
-  };
-
-  const refreshDreamSkinCommunity = async (silent = false) => {
-    const result = await run(() => call<DreamSkinCommunityResult>("refresh_dream_skin_community"));
-    if (result) {
-      setDreamSkinCommunity(result);
-      if (!silent || !isSuccessStatus(result.status)) {
-        showResultNotice(t("DreamSkin 社区"), result, { silentSuccess: true });
-      }
-    }
-    return result;
-  };
-
-  const installDreamSkinCommunityTheme = async (theme: DreamSkinCommunityTheme) => {
-    const result = await run(() => call<DreamSkinCommunityResult>(
-      "install_dream_skin_community_theme",
-      { id: theme.id },
-    ));
-    if (!result) return false;
-    setDreamSkinCommunity(result);
-    showResultNotice(t("DreamSkin 社区"), result);
-    if (!isSuccessStatus(result.status)) return false;
-    await refreshDreamSkinLibrary(true);
-    const draft = await loadDreamSkinThemeDraft(theme.themeId);
-    if (draft) setDreamSkinDraftSelection(`stored:${theme.themeId}`, draft);
-    return true;
-  };
-
-  const refreshPendingDreamSkinCommunity = async () => {
-    const result = await run(() => call<PendingDreamSkinCommunityResult>("load_pending_dream_skin_community"));
-    if (result) setPendingDreamSkinCommunity(result.versionId);
-    return result;
-  };
-
-  const confirmPendingDreamSkinCommunity = async () => {
-    const result = await run(() => call<DreamSkinCommunityResult>("confirm_pending_dream_skin_community"));
-    if (!result) return;
-    setDreamSkinCommunity(result);
-    showResultNotice(t("DreamSkin 社区"), result);
-    if (!isSuccessStatus(result.status)) return;
-    setPendingDreamSkinCommunity("");
-    setRoute("dreamSkin");
-    await refreshDreamSkinLibrary(true);
-    if (result.installedThemeId) {
-      const draft = await loadDreamSkinThemeDraft(result.installedThemeId);
-      if (draft) {
-        setDreamSkinDraftSelection(`stored:${result.installedThemeId}`, draft);
-        await activateDreamSkinDraft(draft);
-      }
-    }
-  };
-
-  const dismissPendingDreamSkinCommunity = async () => {
-    const result = await run(() => call<PendingDreamSkinCommunityResult>("dismiss_pending_dream_skin_community"));
-    if (!result) return;
-    if (isSuccessStatus(result.status)) setPendingDreamSkinCommunity("");
-    else showResultNotice(t("DreamSkin 社区"), result);
-  };
-
-  const importDreamSkinThemePackage = async () => {
-    let selected: string | string[] | null;
-    try {
-      selected = await open({
-        title: t("导入 DreamSkin 主题包"),
-        multiple: false,
-        directory: false,
-        filters: [{ name: "DreamSkin ZIP", extensions: ["zip"] }],
-      });
-    } catch (error) {
-      showNotice(t("主题库"), tf("打开选择器失败：{0}", [stringifyError(error)]), "failed");
-      return;
-    }
-    const path = Array.isArray(selected) ? selected[0] : selected;
-    if (!path) return;
-    const previousIds = new Set(dreamSkinLibrary?.themes.map((item) => item.id) ?? []);
-    const result = await run(() => call<DreamSkinThemeLibraryResult>(
-      "import_dream_skin_theme_package",
-      { path },
-    ));
-    if (!result) return;
-    showResultNotice(t("主题库"), result);
-    if (!isSuccessStatus(result.status)) return;
-    const library = { themes: result.themes, activeDraft: result.activeDraft };
-    setDreamSkinLibrary(library);
-    const imported = result.themes.find((item) => item.kind === "stored" && !previousIds.has(item.id));
-    if (imported) {
-      const draft = await loadDreamSkinThemeDraft(imported.id);
-      if (draft) setDreamSkinDraftSelection(imported.key, draft);
-    }
-    await refreshDreamSkinCommunity(true);
-  };
-
-  const installDreamSkinMarketTheme = async (theme: DreamSkinMarketTheme) => {
-    const result = await run(() => call<DreamSkinMarketResult>("install_dream_skin_market_theme", { id: theme.id }));
-    if (!result) return false;
-    setDreamSkinMarket(result);
-    showResultNotice(t("主题市场"), result);
-    if (!isSuccessStatus(result.status)) return false;
-    await refreshDreamSkinLibrary(true);
-    const draft = await loadDreamSkinThemeDraft(theme.id);
-    if (draft) setDreamSkinDraftSelection(`stored:${theme.id}`, draft);
-    return true;
-  };
-
-  const runAfterDreamSkinDraftGuard = (action: () => void) => {
-    if (!dreamSkinDraftDirty) {
-      action();
-      return;
-    }
-    dreamSkinPendingActionRef.current = action;
-    setDreamSkinUnsavedDialog(true);
-  };
-
-  const loadDreamSkinThemeDraft = async (id: string) => {
-    const result = await run(() => call<DreamSkinThemeDraftResult>("load_dream_skin_theme", { id }));
-    if (!result || !isSuccessStatus(result.status)) {
-      if (result) showResultNotice(t("主题库"), result);
-      return null;
-    }
-    return {
-      config: result.config,
-      imagePath: result.imagePath,
-      builtin: result.builtin,
-    } satisfies DreamSkinThemeDraft;
-  };
-
-  const selectDreamSkinTheme = (item: DreamSkinThemeSummary) => {
-    if (item.key === selectedDreamSkinTheme) return;
-    runAfterDreamSkinDraftGuard(() => {
-      void (async () => {
-        if (item.builtin) {
-          setDreamSkinDraftSelection(item.key, {
-            config: defaultDreamSkinTheme(),
-            imagePath: "",
-            builtin: true,
-          });
-          return;
-        }
-        if (item.active && dreamSkinLibrary) {
-          setDreamSkinDraftSelection(item.key, dreamSkinLibrary.activeDraft);
-          return;
-        }
-        const draft = await loadDreamSkinThemeDraft(item.id);
-        if (draft) setDreamSkinDraftSelection(item.key, draft);
-      })();
-    });
-  };
-
-  const saveDreamSkinThemeDraft = async (): Promise<DreamSkinThemeDraft | null> => {
-    if (!dreamSkinThemeDraft) return null;
-    const selected = dreamSkinLibrary?.themes.find((item) => item.key === selectedDreamSkinTheme);
-    const saveAsNew = dreamSkinThemeDraft.builtin || selected?.kind === "activeUnsaved";
-    const draft: DreamSkinThemeDraft = saveAsNew
-      ? {
-          ...dreamSkinThemeDraft,
-          config: {
-            ...dreamSkinThemeDraft.config,
-            id: dreamSkinThemeDraft.builtin
-              ? `theme-${Date.now()}`
-              : dreamSkinThemeDraft.config.id,
-            name: dreamSkinThemeDraft.config.name === "Dream Skin"
-              ? t("Dream Skin 副本")
-              : dreamSkinThemeDraft.config.name,
-          },
-          builtin: false,
-        }
-      : dreamSkinThemeDraft;
-    const result = await run(() => call<DreamSkinThemeLibraryResult>("save_dream_skin_theme", { draft }));
-    if (!result || !isSuccessStatus(result.status)) {
-      if (result) showResultNotice(t("主题库"), result);
-      return null;
-    }
-    const stored = await loadDreamSkinThemeDraft(draft.config.id);
-    if (!stored) return null;
-    setDreamSkinLibrary({ themes: result.themes, activeDraft: result.activeDraft });
-    setDreamSkinDraftSelection(`stored:${draft.config.id}`, stored);
-    return stored;
-  };
-
-  const createDreamSkinTheme = async () => {
-    let selected: unknown;
-    try {
-      selected = await open({
-        directory: false,
-        multiple: false,
-        title: t("选择皮肤图片"),
-        filters: [{
-          name: t("图片"),
-          extensions: isWindowsPlatform
-            ? ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
-            : ["png", "jpg", "jpeg", "heic", "tif", "tiff", "webp"],
-        }],
-      });
-    } catch (error) {
-      showNotice(t("主题库"), tf("打开选择器失败：{0}", [stringifyError(error)]), "failed");
-      return;
-    }
-    if (typeof selected !== "string" || !selected.trim()) return;
-    const result = await run(() => call<DreamSkinThemeDraftResult>("create_dream_skin_theme", { path: selected.trim() }));
-    if (!result || !isSuccessStatus(result.status)) {
-      if (result) showResultNotice(t("主题库"), result);
-      return;
-    }
-    const draft: DreamSkinThemeDraft = {
-      config: result.config,
-      imagePath: result.imagePath,
-      builtin: result.builtin,
-    };
-    await refreshDreamSkinLibrary(true);
-    setDreamSkinDraftSelection(`stored:${draft.config.id}`, draft);
-  };
-
-  const chooseDreamSkinDraftImage = async () => {
-    let selected: unknown;
-    try {
-      selected = await open({
-        directory: false,
-        multiple: false,
-        title: t("选择皮肤图片"),
-        filters: [{
-          name: t("图片"),
-          extensions: isWindowsPlatform
-            ? ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
-            : ["png", "jpg", "jpeg", "heic", "tif", "tiff", "webp"],
-        }],
-      });
-    } catch (error) {
-      showNotice(t("主题库"), tf("打开选择器失败：{0}", [stringifyError(error)]), "failed");
-      return;
-    }
-    if (typeof selected === "string" && selected.trim()) {
-      setDreamSkinThemeDraft((current) => current ? { ...current, imagePath: selected.trim() } : current);
-    }
-  };
-
-  const activateDreamSkinDraft = async (initialDraft: DreamSkinThemeDraft) => {
-    const currentTheme = pendingDreamSkinRestart
-      ? {
-          key: pendingDreamSkinRestart.currentThemeKey,
-          name: pendingDreamSkinRestart.currentThemeName,
-        }
-      : dreamSkinLibrary?.themes.find((item) => item.active) ?? null;
-    let draft = initialDraft;
-    if (draft.builtin && dreamSkinDraftDirty) {
-      const stored = await saveDreamSkinThemeDraft();
-      if (!stored) return false;
-      draft = stored;
-    }
-    const saved = await persistDreamSkinSettings({
-      ...settingsForm,
-      codexAppDreamSkinEnabled: true,
-      codexAppDreamSkinPaused: false,
-    });
-    if (!saved) return false;
-    const ports = dreamSkinRequest().request;
-    const result = await run(() => call<DreamSkinThemeActivationResult>("activate_dream_skin_theme", {
-      request: {
-        draft,
-        debugPort: ports.debugPort,
-        helperPort: ports.helperPort,
-      },
-    }));
-    if (!result || !isSuccessStatus(result.status)) {
-      if (result) showResultNotice(t("主题库"), result);
-      return false;
-    }
-    setDreamSkinLibrary(result.library);
-    setDreamSkinStatus({ ...result.runtime, status: result.status, message: result.message });
-    const active = result.library.themes.find((item) => item.active);
-    if (active) setDreamSkinDraftSelection(active.key, result.library.activeDraft);
-    await refreshSettings(true);
-    if (result.savedForNextLaunch) {
-      setPendingDreamSkinRestart({
-        currentThemeKey: currentTheme?.key ?? null,
-        currentThemeName: currentTheme?.name ?? t("当前皮肤"),
-        pendingThemeKey: active?.key ?? selectedDreamSkinTheme,
-        pendingThemeName: active?.name ?? draft.config.name,
-      });
-      showNotice(t("主题库"), t("主题已保存并设为待应用，不会自动重启 Codex。"), "not_checked");
-    } else {
-      setPendingDreamSkinRestart(null);
-    }
-    return true;
-  };
-
-  const activateDreamSkinTheme = async () => {
-    if (!dreamSkinThemeDraft) return;
-    await activateDreamSkinDraft(dreamSkinThemeDraft);
-  };
-
-  const renameDreamSkinTheme = async (item: DreamSkinThemeSummary) => {
-    const name = window.prompt(t("输入新的主题名称"), item.name)?.trim();
-    if (!name || name === item.name) return;
-    const result = await run(() => call<DreamSkinThemeLibraryResult>("rename_dream_skin_theme", { id: item.id, name }));
-    if (!result || !isSuccessStatus(result.status)) {
-      if (result) showResultNotice(t("主题库"), result);
-      return;
-    }
-    setDreamSkinLibrary({ themes: result.themes, activeDraft: result.activeDraft });
-    if (selectedDreamSkinTheme === item.key) {
-      setDreamSkinThemeDraft((current) => current
-        ? { ...current, config: { ...current.config, name } }
-        : current);
-      setSavedDreamSkinThemeDraft((current) => current
-        ? { ...current, config: { ...current.config, name } }
-        : current);
-    }
-  };
-
-  const deleteDreamSkinTheme = async (item: DreamSkinThemeSummary) => {
-    const confirmed = await confirmSessionDelete(
-      t("删除主题"),
-      tf("删除主题“{0}”？此操作无法撤销。", [item.name]),
-    );
-    if (!confirmed) return;
-    const result = await run(() => call<DreamSkinThemeLibraryResult>("delete_dream_skin_theme", { id: item.id }));
-    if (!result || !isSuccessStatus(result.status)) {
-      if (result) showResultNotice(t("主题库"), result);
-      return;
-    }
-    setDreamSkinLibrary({ themes: result.themes, activeDraft: result.activeDraft });
-    const active = result.themes.find((candidate) => candidate.active) ?? result.themes[0];
-    if (active) {
-      const draft = active.builtin
-        ? { config: defaultDreamSkinTheme(), imagePath: "", builtin: true }
-        : result.activeDraft;
-      setDreamSkinDraftSelection(active.key, draft);
-    }
-  };
 
   const selectSessionIndexCleanupCandidates = (candidates: SessionIndexCleanupCandidate[]) =>
     new Promise<string[] | null>((resolve) => {
@@ -2130,11 +1534,7 @@ export function App() {
     }
   };
 
-  const navigate = async (next: Route, skipDreamSkinDraftGuard = false) => {
-    if (!skipDreamSkinDraftGuard && route === "dreamSkin" && next !== "dreamSkin" && dreamSkinDraftDirty) {
-      runAfterDreamSkinDraftGuard(() => void navigate(next, true));
-      return;
-    }
+  const navigate = async (next: Route) => {
     setRoute(next);
     if (next === "overview") await refreshOverview(true);
     if (next === "relay") {
@@ -2146,15 +1546,10 @@ export function App() {
       await refreshCcsProviders(true);
     }
     if (next === "relayEnvironment") await refreshRelayEnvironment(true);
-    if (next === "grok") await refreshGrokConfig(true);
     if (next === "sessions") {
       await refreshSettings(true);
       await refreshLocalSessions(true);
       await refreshProviderSyncTargets(true);
-    }
-    if (next === "zedRemote") {
-      await refreshSettings(true);
-      await refreshZedRemoteProjects(true);
     }
     if (next === "context") {
       await refreshSettings(true);
@@ -2166,18 +1561,11 @@ export function App() {
       await listInstalledSkills();
       await refreshSkillCatalog(true);
     }
+    if (next === "toml") await refreshLiveConfig(true);
     if (next === "weixin") {
       await refreshSettings(true);
       await refreshWeixinStatus(true);
       await refreshLocalSessions(true);
-    }
-    if (next === "dreamSkin") {
-      await refreshSettings(true);
-      await refreshOverview(true);
-      await refreshDreamSkinStatus(true);
-      await refreshDreamSkinLibrary(true);
-      await refreshDreamSkinMarket(true);
-      await refreshDreamSkinCommunity(true);
     }
     if (next === "settings") await refreshSettings(true);
     if (next === "userScripts") {
@@ -2185,7 +1573,6 @@ export function App() {
       await refreshScriptMarket(true);
       await refreshUserScriptInventory();
     }
-    if (next === "recommendations") await refreshAds(true);
     if (next === "about") {
       await refreshOverview(true);
       await refreshLogs(true);
@@ -2223,7 +1610,6 @@ export function App() {
       completion
       && resolveLaunchStatus(completion.latest_launch, result.launchStartedAtMs ?? 0) === "success",
     );
-    if (succeeded) setPendingDreamSkinRestart(null);
     return succeeded;
   };
 
@@ -2583,14 +1969,6 @@ export function App() {
     }
   };
 
-  const refreshAds = async (silent = false) => {
-    const result = await run(() => call<AdsResult>("load_ads"));
-    if (result) {
-      setAds(result);
-      if (!silent) showResultNotice(t("推荐内容"), result, { silentSuccess: true });
-    }
-  };
-
   const refreshProviderSyncTargets = async (silent = false) => {
     const result = await run(() => call<ProviderSyncTargetsResult>("load_provider_sync_targets"));
     if (result) {
@@ -2893,10 +2271,6 @@ export function App() {
     return result ?? null;
   };
 
-  const testStepwiseSettings = async (settings: BackendSettings) => {
-    const result = await run(() => call<StepwiseTestResult>("test_stepwise_settings", { settings }));
-    if (result) showNotice("Stepwise 测试", result.message, result.status);
-  };
 
   const fetchRelayProfileModels = async (profile: RelayProfile) => {
     const result = await run(() => call<RelayProfileModelsResult>("fetch_relay_profile_models", { profile }));
@@ -3083,7 +2457,6 @@ export function App() {
       await refreshProviderSyncTargets(true);
       await refreshPendingProviderImport(true);
       await refreshPendingSessionShare(true);
-      await refreshPendingDreamSkinCommunity();
       await refreshRemotePluginMarketplace(true);
     })();
   }, []);
@@ -3092,9 +2465,8 @@ export function App() {
     if (getLanguage() === "en") {
       void invoke("update_tray_labels", {
         showLabel: "Show window",
-        applySkinLabel: "Apply Dream Skin",
         quitLabel: "Quit",
-        windowTitle: "Codex++ Manager",
+        windowTitle: "Codex++",
       });
     }
   }, []);
@@ -3103,7 +2475,6 @@ export function App() {
     const timer = window.setInterval(() => {
       void refreshPendingProviderImport(true);
       void refreshPendingSessionShare(true);
-      void refreshPendingDreamSkinCommunity();
     }, 1200);
     return () => window.clearInterval(timer);
   }, []);
@@ -3162,66 +2533,6 @@ export function App() {
       await refreshOverview(true);
     }
     return result;
-  };
-
-  const persistDreamSkinSettings = async (next: BackendSettings) => {
-    const normalized = normalizeSettings(next);
-    const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized }));
-    if (!result) return null;
-    setSettings(result);
-    setSettingsForm(normalizeSettings(result.settings));
-    if (!isSuccessStatus(result.status)) {
-      showNotice(t("皮肤管理"), result.message, result.status);
-      return null;
-    }
-    return result;
-  };
-
-  const restoreDreamSkin = async () => {
-    const currentTheme = pendingDreamSkinRestart
-      ? {
-          key: pendingDreamSkinRestart.currentThemeKey,
-          name: pendingDreamSkinRestart.currentThemeName,
-        }
-      : dreamSkinLibrary?.themes.find((item) => item.active) ?? null;
-    const result = await run(() => call<DreamSkinRuntimeResult>("restore_dream_skin", dreamSkinRequest()));
-    if (!result) return;
-    setDreamSkinStatus(result);
-    await refreshSettings(true);
-    showResultNotice(t("皮肤管理"), result);
-    if (isSuccessStatus(result.status)) {
-      setPendingDreamSkinRestart({
-        currentThemeKey: currentTheme?.key ?? null,
-        currentThemeName: currentTheme?.name ?? t("当前皮肤"),
-        pendingThemeKey: "codex-original-appearance",
-        pendingThemeName: t("Codex 原始外观"),
-      });
-    }
-  };
-
-  const verifyDreamSkin = async (withScreenshot: boolean) => {
-    let screenshotPath: string | undefined;
-    if (withScreenshot) {
-      try {
-        const selected = await saveDialog({
-          title: t("保存 Dream Skin 截图"),
-          defaultPath: "codex-dream-skin-verification.png",
-          filters: [{ name: "PNG", extensions: ["png"] }],
-        });
-        if (!selected) return;
-        screenshotPath = selected;
-      } catch (error) {
-        showNotice(t("保存截图"), tf("打开选择器失败：{0}", [stringifyError(error)]), "failed");
-        return;
-      }
-    }
-    const result = await run(() =>
-      call<DreamSkinVerificationResult>("verify_dream_skin", dreamSkinRequest(screenshotPath)),
-    );
-    if (!result) return;
-    setDreamSkinVerification(result);
-    showResultNotice(withScreenshot ? t("保存截图") : t("实机验证"), result);
-    await refreshDreamSkinStatus(true);
   };
 
   const actions = useMemo(
@@ -3302,51 +2613,6 @@ export function App() {
           }));
         }
       },
-      chooseDreamSkinImagePath: chooseDreamSkinDraftImage,
-      resetDreamSkinImage: async () => runAfterDreamSkinDraftGuard(() => {
-        setDreamSkinThemeDraft((current) => current ? { ...current, imagePath: "" } : current);
-      }),
-      resetDreamSkinTheme: async () => runAfterDreamSkinDraftGuard(() => {
-        setDreamSkinThemeDraft((current) => {
-          if (!current) return current;
-          if (isWindowsPlatform) {
-            const config = { ...current.config };
-            delete config.colors;
-            delete config.palette;
-            return { ...current, config };
-          }
-          const defaults = defaultDreamSkinTheme();
-          return {
-            ...current,
-            config: current.builtin
-              ? defaults
-              : { ...defaults, id: current.config.id, name: current.config.name },
-            imagePath: "",
-          };
-        });
-      }),
-      refreshDreamSkinLibrary,
-      refreshDreamSkinMarket,
-      refreshDreamSkinCommunity,
-      installDreamSkinMarketTheme,
-      installDreamSkinCommunityTheme,
-      importDreamSkinThemePackage,
-      createDreamSkinTheme: async () => runAfterDreamSkinDraftGuard(() => void createDreamSkinTheme()),
-      saveDreamSkinTheme: saveDreamSkinThemeDraft,
-      selectDreamSkinTheme,
-      renameDreamSkinTheme,
-      deleteDreamSkinTheme: async (item: DreamSkinThemeSummary) => {
-        if (item.key === selectedDreamSkinTheme && dreamSkinDraftDirty) {
-          runAfterDreamSkinDraftGuard(() => void deleteDreamSkinTheme(item));
-          return;
-        }
-        await deleteDreamSkinTheme(item);
-      },
-      activateDreamSkinTheme,
-      refreshDreamSkinStatus,
-      restoreDreamSkin,
-      verifyDreamSkin: () => verifyDreamSkin(false),
-      saveDreamSkinScreenshot: () => verifyDreamSkin(true),
       saveManualCodexAppPath: async () => {
         const appPath = launchForm.appPath.trim();
         if (!appPath) {
@@ -3378,8 +2644,9 @@ export function App() {
       resetCcsDbPath,
       refreshLiveContextEntries,
       syncLiveContextEntries,
-      refreshAds,
       refreshScriptMarket,
+      refreshLiveConfig,
+      previewLiveConfig,
       refreshUserScriptInventory,
       installMarketScript,
       setUserScriptEnabled,
@@ -3402,9 +2669,6 @@ export function App() {
       setSessionShareUrl,
       deleteLocalSession,
       deleteLocalSessions,
-      refreshZedRemoteProjects,
-      openZedRemoteProject,
-      forgetZedRemoteProject,
       openExternalUrl,
       applyRelayInjection,
       applyPureApiInjection,
@@ -3419,7 +2683,6 @@ export function App() {
       extractRelayCommonConfig,
       testRelayProfile,
       diagnoseRelayProfile,
-      testStepwiseSettings,
       fetchRelayProfileModels,
       fetchSub2ApiBilling,
       switchRelayProfile,
@@ -3445,7 +2708,7 @@ export function App() {
       disableWatcher: () => watcherAction("disable_watcher"),
       toggleTheme: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
     }),
-    [route, launchForm, settingsForm, settings, overview, removeOwnedData, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, sessionShareUrl, importSessionUrl, zedRemoteProjects, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, dreamSkinLibrary, dreamSkinMarket, dreamSkinCommunity, selectedDreamSkinTheme, savedDreamSkinThemeDraft, dreamSkinThemeDraft, dreamSkinDraftDirty, pendingDreamSkinRestart],
+    [route, launchForm, settingsForm, settings, overview, removeOwnedData, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, sessionShareUrl, importSessionUrl, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, liveConfig],
   );
   const hasUpdate = update?.updateAvailable === true;
 
@@ -3500,14 +2763,31 @@ export function App() {
             </div>
           ))}
         </nav>
+        <div className="sidebar-footer">
+          <div className="sidebar-footer-status">
+            <span className="status-pulse" aria-hidden="true" />
+            <span>{t("管理器就绪")}</span>
+          </div>
+          <span className="sidebar-footer-version">
+            {overview?.current_version ? "v" + overview.current_version : "Codex++"}
+          </span>
+        </div>
       </aside>
       <main className="workspace">
         <header className="topbar" key={`topbar-${route}`}>
           <div>
+            <div className="topbar-eyebrow">
+              <span className="topbar-eyebrow-mark" aria-hidden="true" />
+              {t("Codex++ 工作区")}
+            </div>
             <h1>{routeTitle(route)}</h1>
             <p>{routeSubtitle(route)}</p>
           </div>
           <div className="topbar-actions">
+            <div className="topbar-status">
+              <span className="status-pulse" aria-hidden="true" />
+              <span>{t("实时状态")}</span>
+            </div>
             <Button
               onClick={() => toggleLanguage()}
               size="icon"
@@ -3554,13 +2834,6 @@ export function App() {
           {route === "relayEnvironment" ? (
             <RelayEnvironmentScreen result={relayEnvironment} actions={actions} />
           ) : null}
-          {route === "grok" ? (
-            <GrokConfigScreen
-              config={grokConfig}
-              onRefresh={() => refreshGrokConfig(false)}
-              onSave={saveGrokConfig}
-            />
-          ) : null}
           {route === "sessions" ? (
             <SessionsScreen
               settings={settings}
@@ -3583,6 +2856,8 @@ export function App() {
             />
           ) : null}
           {route === "skills" ? <SkillsScreen skills={skills} actions={actions} /> : null}
+          {route === "prompts" ? <CodexXPromptsScreen /> : null}
+          {route === "toml" ? <LiveTomlScreen liveConfig={liveConfig} actions={actions} /> : null}
           {route === "weixin" ? (
             <WeixinConnectScreen
               form={settingsForm}
@@ -3612,28 +2887,7 @@ export function App() {
               actions={actions}
             />
           ) : null}
-          {route === "dreamSkin" ? (
-            <DreamSkinScreen
-              form={settingsForm}
-              library={dreamSkinLibrary}
-              market={dreamSkinMarket}
-              community={dreamSkinCommunity}
-              draft={dreamSkinThemeDraft}
-              dirty={dreamSkinDraftDirty}
-              pendingRestart={pendingDreamSkinRestart}
-              selectedTheme={selectedDreamSkinTheme}
-              status={dreamSkinStatus}
-              verification={dreamSkinVerification}
-              onFormChange={setSettingsForm}
-              onDraftChange={setDreamSkinThemeDraft}
-              actions={actions}
-            />
-          ) : null}
-          {route === "zedRemote" ? (
-            <ZedRemoteScreen projects={zedRemoteProjects} form={settingsForm} onFormChange={setSettingsForm} actions={actions} />
-          ) : null}
           {route === "userScripts" ? <UserScriptsScreen settings={settings} market={scriptMarket} actions={actions} /> : null}
-          {route === "recommendations" ? <RecommendationsScreen ads={ads} actions={actions} /> : null}
           {route === "maintenance" ? (
             <MaintenanceScreen
               overview={overview}
@@ -3701,43 +2955,6 @@ export function App() {
           }}
         />
       ) : null}
-      {dreamSkinUnsavedDialog ? (
-        <DreamSkinUnsavedDialog
-          onCancel={() => {
-            dreamSkinPendingActionRef.current = null;
-            setDreamSkinUnsavedDialog(false);
-          }}
-          onDiscard={() => {
-            const pending = dreamSkinPendingActionRef.current;
-            dreamSkinPendingActionRef.current = null;
-            setDreamSkinThemeDraft(savedDreamSkinThemeDraft);
-            setDreamSkinUnsavedDialog(false);
-            pending?.();
-          }}
-          onSave={() => void (async () => {
-            const saved = await saveDreamSkinThemeDraft();
-            if (!saved) return;
-            const pending = dreamSkinPendingActionRef.current;
-            dreamSkinPendingActionRef.current = null;
-            setDreamSkinUnsavedDialog(false);
-            pending?.();
-          })()}
-        />
-      ) : null}
-      {pendingProviderImport ? (
-        <PendingProviderImportDialog
-          request={pendingProviderImport}
-          onConfirm={() => void confirmPendingProviderImport()}
-          onDismiss={() => void dismissPendingProviderImport()}
-        />
-      ) : null}
-      {pendingDreamSkinCommunity ? (
-        <DreamSkinCommunityLinkDialog
-          versionId={pendingDreamSkinCommunity}
-          onConfirm={() => void confirmPendingDreamSkinCommunity()}
-          onDismiss={() => void dismissPendingDreamSkinCommunity()}
-        />
-      ) : null}
     </div>
   );
 }
@@ -3762,25 +2979,6 @@ type Actions = {
   chooseCodexAppPath: (mode: "folder" | "file") => Promise<void>;
   clearCodexAppPath: () => Promise<void>;
   chooseImageOverlayPath: () => Promise<void>;
-  chooseDreamSkinImagePath: () => Promise<void>;
-  resetDreamSkinImage: () => Promise<void>;
-  resetDreamSkinTheme: () => Promise<void>;
-  refreshDreamSkinLibrary: (silent?: boolean) => Promise<DreamSkinThemeLibrary | null>;
-  refreshDreamSkinMarket: (silent?: boolean) => Promise<DreamSkinMarketResult | null>;
-  installDreamSkinMarketTheme: (theme: DreamSkinMarketTheme) => Promise<boolean>;
-  refreshDreamSkinCommunity: (silent?: boolean) => Promise<DreamSkinCommunityResult | null>;
-  installDreamSkinCommunityTheme: (theme: DreamSkinCommunityTheme) => Promise<boolean>;
-  importDreamSkinThemePackage: () => Promise<void>;
-  createDreamSkinTheme: () => Promise<void>;
-  saveDreamSkinTheme: () => Promise<DreamSkinThemeDraft | null>;
-  selectDreamSkinTheme: (item: DreamSkinThemeSummary) => void;
-  renameDreamSkinTheme: (item: DreamSkinThemeSummary) => Promise<void>;
-  deleteDreamSkinTheme: (item: DreamSkinThemeSummary) => Promise<void>;
-  activateDreamSkinTheme: () => Promise<void>;
-  refreshDreamSkinStatus: (silent?: boolean) => Promise<DreamSkinRuntimeResult | null>;
-  restoreDreamSkin: () => Promise<void>;
-  verifyDreamSkin: () => Promise<void>;
-  saveDreamSkinScreenshot: () => Promise<void>;
   saveManualCodexAppPath: () => Promise<void>;
   syncProvidersNow: () => Promise<void>;
   refreshProviderSyncTargets: (silent?: boolean) => Promise<ProviderSyncTargetsResult | null>;
@@ -3797,8 +2995,9 @@ type Actions = {
   resetCcsDbPath: () => Promise<void>;
   refreshLiveContextEntries: () => Promise<LiveContextEntriesResult | null>;
   syncLiveContextEntries: (settings: BackendSettings, silent?: boolean) => Promise<LiveContextEntriesResult | null>;
-  refreshAds: () => Promise<void>;
   refreshScriptMarket: () => Promise<void>;
+  refreshLiveConfig: (silent?: boolean) => Promise<LiveConfigResult | null>;
+  previewLiveConfig: (text: string) => Promise<LiveConfigPreviewResult | null>;
   refreshUserScriptInventory: () => Promise<SettingsResult | null>;
   installMarketScript: (id: string) => Promise<void>;
   setUserScriptEnabled: (key: string, enabled: boolean) => Promise<void>;
@@ -3822,9 +3021,6 @@ type Actions = {
   setSessionShareUrl: (url: string) => void;
   deleteLocalSession: (session: LocalSession) => Promise<void>;
   deleteLocalSessions: (sessions: LocalSession[]) => Promise<void>;
-  refreshZedRemoteProjects: () => Promise<ZedRemoteProjectsResult | null>;
-  openZedRemoteProject: (project: ZedRemoteProject, strategy?: ZedOpenStrategy) => Promise<void>;
-  forgetZedRemoteProject: (project: ZedRemoteProject) => Promise<void>;
   openExternalUrl: (url: string) => Promise<void>;
   applyRelayInjection: () => Promise<boolean>;
   applyPureApiInjection: () => Promise<boolean>;
@@ -3844,7 +3040,6 @@ type Actions = {
   extractRelayCommonConfig: (configContents: string) => Promise<ExtractRelayCommonConfigResult | null>;
   testRelayProfile: (profile: RelayProfile) => Promise<void>;
   diagnoseRelayProfile: (profile: RelayProfile) => Promise<ProviderDoctorResult | null>;
-  testStepwiseSettings: (settings: BackendSettings) => Promise<void>;
   fetchRelayProfileModels: (profile: RelayProfile) => Promise<string[] | null>;
   fetchSub2ApiBilling: (profile: RelayProfile) => Promise<Sub2ApiBillingResult | null>;
   switchRelayProfile: (settings: BackendSettings, previousActiveRelayId?: string) => Promise<void>;
@@ -4328,40 +3523,6 @@ function OverviewScreen({
   const health = healthItems(overview);
   return (
     <>
-      <Panel className="jojocode-overview">
-        <CardContent>
-          <div className="jojocode-overview-layout">
-            <div className="jojocode-overview-main">
-              <div className="jojocode-overview-mark">
-                <Network className="h-5 w-5" />
-              </div>
-              <div>
-                <span className="eyebrow">{t("项目赞助商")}</span>
-                <h2>JOJO Code</h2>
-                <p>
-                  {t("JOJO Code 提供稳定、价格合理的 API 中转服务，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力。")}
-                </p>
-              </div>
-            </div>
-            <div className="jojocode-overview-side">
-              <div className="jojocode-model-tags">
-                <span>GPT-5.6 全系列</span>
-                <span>Fable 5</span>
-                <span>Sonnet 5</span>
-                <span>GPT-5.5</span>
-                <span>GPT-5.4</span>
-                <span>Opus 4.8</span>
-                <span>Opus 4.7</span>
-                <span>gpt-image-2</span>
-              </div>
-              <Button onClick={() => void actions.openExternalUrl("https://jojocode.com/")}>
-                <ExternalLink className="h-4 w-4" />
-                {t("打开 JOJO Code")}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Panel>
       <Panel>
         <CardHead title={t("健康检查")} detail={t("概览只展示关键问题，具体配置在对应页面处理")} />
         <CardContent>
@@ -4417,378 +3578,6 @@ function OverviewScreen({
         </CardContent>
       </Panel>
     </>
-  );
-}
-
-type GrokModelDraft = GrokModelInput & {
-  clientId: string;
-  apiKeyConfigured: boolean;
-  contextWindowText: string;
-};
-
-type GrokConfigDraft = {
-  revision: string;
-  defaultModel: string;
-  modelsBaseUrl: string;
-  models: GrokModelDraft[];
-};
-
-let grokDraftSequence = 0;
-
-function nextGrokDraftId() {
-  grokDraftSequence += 1;
-  return `grok-model-${Date.now()}-${grokDraftSequence}`;
-}
-
-function grokDraftFromConfig(config: GrokConfigResult): GrokConfigDraft {
-  return {
-    revision: config.revision,
-    defaultModel: config.defaultModel,
-    modelsBaseUrl: config.modelsBaseUrl,
-    models: config.models.map((model) => ({
-      clientId: nextGrokDraftId(),
-      sourceAlias: model.alias,
-      alias: model.alias,
-      model: model.model,
-      name: model.name,
-      baseUrl: model.baseUrl,
-      apiBackend: model.apiBackend,
-      contextWindow: model.contextWindow,
-      contextWindowText: model.contextWindow?.toString() ?? "",
-      apiKeyConfigured: model.apiKeyConfigured,
-      apiKeyUpdate: "",
-      removeApiKey: false,
-    })),
-  };
-}
-
-function grokRequestFromDraft(draft: GrokConfigDraft): SaveGrokConfigRequest {
-  return {
-    revision: draft.revision,
-    defaultModel: draft.defaultModel.trim(),
-    modelsBaseUrl: draft.modelsBaseUrl.trim(),
-    models: draft.models.map((model) => ({
-      sourceAlias: model.sourceAlias,
-      alias: model.alias.trim(),
-      model: model.model.trim(),
-      name: model.name.trim(),
-      baseUrl: model.baseUrl.trim(),
-      apiBackend: model.apiBackend,
-      contextWindow: model.contextWindowText.trim() ? Number.parseInt(model.contextWindowText, 10) : null,
-      apiKeyUpdate: model.apiKeyUpdate.trim(),
-      removeApiKey: model.removeApiKey,
-    })),
-  };
-}
-
-function grokDraftValidation(draft: GrokConfigDraft) {
-  const aliases = draft.models.map((model) => model.alias.trim());
-  if (aliases.some((alias) => !alias)) return t("模型别名不能为空。");
-  if (new Set(aliases).size !== aliases.length) return t("模型别名不能重复。");
-  for (const model of draft.models) {
-    const value = model.contextWindowText.trim();
-    if (value && (!/^\d+$/.test(value) || Number(value) <= 0 || !Number.isSafeInteger(Number(value)))) {
-      return tf("模型「{0}」的上下文窗口必须是大于 0 的整数。", [model.alias || t("未命名")]);
-    }
-  }
-  return "";
-}
-
-function GrokConfigScreen({
-  config,
-  onRefresh,
-  onSave,
-}: {
-  config: GrokConfigResult | null;
-  onRefresh: () => Promise<GrokConfigResult | null>;
-  onSave: (request: SaveGrokConfigRequest) => Promise<SaveGrokConfigResult | null>;
-}) {
-  const [draft, setDraft] = useState<GrokConfigDraft | null>(null);
-  const [selectedId, setSelectedId] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!config) return;
-    const next = grokDraftFromConfig(config);
-    setDraft(next);
-    setSelectedId((current) => next.models.some((model) => model.clientId === current) ? current : next.models[0]?.clientId ?? "");
-  }, [config]);
-
-  const savedRequest = useMemo(
-    () => config ? grokRequestFromDraft(grokDraftFromConfig(config)) : null,
-    [config],
-  );
-  const currentRequest = useMemo(() => draft ? grokRequestFromDraft(draft) : null, [draft]);
-  const dirty = Boolean(savedRequest && currentRequest && JSON.stringify(savedRequest) !== JSON.stringify(currentRequest));
-  const validationError = draft ? grokDraftValidation(draft) : "";
-  const selected = draft?.models.find((model) => model.clientId === selectedId) ?? null;
-
-  const updateSelected = (patch: Partial<GrokModelDraft>) => {
-    if (!draft || !selected) return;
-    setDraft((current) => {
-      if (!current) return current;
-      const nextDefault = patch.alias !== undefined && current.defaultModel === selected.alias
-        ? patch.alias
-        : current.defaultModel;
-      return {
-        ...current,
-        defaultModel: nextDefault,
-        models: current.models.map((model) => model.clientId === selected.clientId ? { ...model, ...patch } : model),
-      };
-    });
-  };
-
-  const addModel = () => {
-    if (!draft) return;
-    const aliases = new Set(draft.models.map((model) => model.alias));
-    let index = draft.models.length + 1;
-    while (aliases.has(`grok-model-${index}`)) index += 1;
-    const model: GrokModelDraft = {
-      clientId: nextGrokDraftId(),
-      sourceAlias: "",
-      alias: `grok-model-${index}`,
-      model: "",
-      name: "",
-      baseUrl: "",
-      apiBackend: "responses",
-      contextWindow: null,
-      contextWindowText: "",
-      apiKeyConfigured: false,
-      apiKeyUpdate: "",
-      removeApiKey: false,
-    };
-    setDraft({
-      ...draft,
-      defaultModel: draft.defaultModel || model.alias,
-      models: [...draft.models, model],
-    });
-    setSelectedId(model.clientId);
-  };
-
-  const deleteSelected = () => {
-    if (!draft || !selected) return;
-    if (!window.confirm(tf("删除 Grok 模型「{0}」？", [selected.alias || t("未命名")]))) return;
-    const remaining = draft.models.filter((model) => model.clientId !== selected.clientId);
-    setDraft({
-      ...draft,
-      defaultModel: draft.defaultModel === selected.alias ? remaining[0]?.alias ?? "" : draft.defaultModel,
-      models: remaining,
-    });
-    setSelectedId(remaining[0]?.clientId ?? "");
-  };
-
-  const discard = () => {
-    if (!config) return;
-    const next = grokDraftFromConfig(config);
-    setDraft(next);
-    setSelectedId(next.models[0]?.clientId ?? "");
-  };
-
-  const saveDraft = async () => {
-    if (!draft || validationError) return;
-    setSaving(true);
-    try {
-      await onSave(grokRequestFromDraft(draft));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!config || !draft) {
-    return (
-      <Panel>
-        <CardHead title={t("Grok 配置")} detail={t("正在读取本机 Grok 配置")} />
-        <CardContent>
-          <Button onClick={() => void onRefresh()} variant="outline">
-            <RefreshCw className="h-4 w-4" />
-            {t("重新读取")}
-          </Button>
-        </CardContent>
-      </Panel>
-    );
-  }
-
-  return (
-    <div className="grok-page">
-      <Panel className="grok-overview-panel">
-        <CardHead title={t("本机配置")} detail={config.configPath} />
-        <CardContent className="grok-overview-content">
-          <div className="grok-status-strip">
-            <div>
-              <span>Grok CLI</span>
-              <strong data-status={config.cliInstalled ? "ok" : "missing"}>
-                {config.cliInstalled ? t("已检测") : t("未检测")}
-              </strong>
-              <code>{config.cliPath || t("未找到可执行文件")}</code>
-            </div>
-            <div>
-              <span>config.toml</span>
-              <strong data-status={config.configExists ? "ok" : "missing"}>
-                {config.configExists ? t("已存在") : t("保存时创建")}
-              </strong>
-              <code>{config.grokHome}</code>
-            </div>
-          </div>
-          <div className="grok-global-fields">
-            <Label className="grok-form-row">
-              <span>{t("默认模型")}</span>
-              <Input
-                list="grok-model-aliases"
-                onChange={(event) => setDraft({ ...draft, defaultModel: event.currentTarget.value })}
-                placeholder="grok-build"
-                value={draft.defaultModel}
-              />
-            </Label>
-            <datalist id="grok-model-aliases">
-              {draft.models.map((model) => <option key={model.clientId} value={model.alias} />)}
-            </datalist>
-            <Label className="grok-form-row">
-              <span>{t("模型发现端点")}</span>
-              <Input
-                onChange={(event) => setDraft({ ...draft, modelsBaseUrl: event.currentTarget.value })}
-                placeholder="https://api.example.com/v1"
-                value={draft.modelsBaseUrl}
-              />
-            </Label>
-          </div>
-        </CardContent>
-      </Panel>
-
-      <div className="grok-manager-grid">
-        <Panel className="grok-model-list-panel">
-          <div className="grok-panel-title">
-            <div>
-              <strong>{t("模型配置")}</strong>
-              <span>{tf("{0} 个模型", [draft.models.length])}</span>
-            </div>
-            <Button onClick={addModel} size="sm">
-              <Plus className="h-4 w-4" />
-              {t("新增")}
-            </Button>
-          </div>
-          <div className="grok-model-list">
-            {draft.models.map((model) => (
-              <button
-                className={`grok-model-item ${model.clientId === selectedId ? "active" : ""}`}
-                key={model.clientId}
-                onClick={() => setSelectedId(model.clientId)}
-                type="button"
-              >
-                <span className="grok-model-mark"><Bot className="h-4 w-4" /></span>
-                <span className="grok-model-copy">
-                  <strong>{model.alias || t("未命名")}</strong>
-                  <small>{model.name || model.model || t("未填写模型")}</small>
-                </span>
-                {draft.defaultModel === model.alias ? <UiBadge>{t("默认")}</UiBadge> : null}
-              </button>
-            ))}
-            {!draft.models.length ? <div className="empty">{t("暂无 Grok 模型配置")}</div> : null}
-          </div>
-        </Panel>
-
-        <Panel className="grok-editor-panel">
-          {selected ? (
-            <>
-              <div className="grok-panel-title grok-editor-title">
-                <div>
-                  <strong>{selected.alias || t("未命名模型")}</strong>
-                  <span>{selected.sourceAlias ? t("本机模型配置") : t("新模型配置")}</span>
-                </div>
-                <Button onClick={deleteSelected} size="icon" title={t("删除模型")} variant="outline">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="grok-editor-fields">
-                <Label className="grok-form-row">
-                  <span>{t("模型别名")}</span>
-                  <Input value={selected.alias} onChange={(event) => updateSelected({ alias: event.currentTarget.value })} />
-                </Label>
-                <Label className="grok-form-row">
-                  <span>{t("显示名称")}</span>
-                  <Input value={selected.name} onChange={(event) => updateSelected({ name: event.currentTarget.value })} />
-                </Label>
-                <Label className="grok-form-row">
-                  <span>{t("实际模型 ID")}</span>
-                  <Input placeholder={selected.alias} value={selected.model} onChange={(event) => updateSelected({ model: event.currentTarget.value })} />
-                </Label>
-                <Label className="grok-form-row">
-                  <span>Base URL</span>
-                  <Input placeholder={draft.modelsBaseUrl || "https://api.example.com/v1"} value={selected.baseUrl} onChange={(event) => updateSelected({ baseUrl: event.currentTarget.value })} />
-                </Label>
-                <div className="grok-form-row">
-                  <span>{t("API 协议")}</span>
-                  <div className="grok-protocol-options">
-                    {([
-                      ["responses", "Responses"],
-                      ["chat_completions", "Chat Completions"],
-                      ["messages", "Messages"],
-                    ] as Array<[GrokApiBackend, string]>).map(([value, label]) => (
-                      <button
-                        className={selected.apiBackend === value ? "active" : ""}
-                        key={value}
-                        onClick={() => updateSelected({ apiBackend: value })}
-                        type="button"
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <Label className="grok-form-row">
-                  <span>{t("上下文窗口")}</span>
-                  <Input
-                    inputMode="numeric"
-                    placeholder={t("留空使用 Grok 默认值")}
-                    value={selected.contextWindowText}
-                    onChange={(event) => updateSelected({ contextWindowText: event.currentTarget.value.replace(/[^\d]/g, "") })}
-                  />
-                </Label>
-                <div className="grok-form-row">
-                  <span>API Key</span>
-                  <div className="grok-key-control">
-                    <Input
-                      autoComplete="off"
-                      disabled={selected.removeApiKey}
-                      onChange={(event) => updateSelected({ apiKeyUpdate: event.currentTarget.value, removeApiKey: false })}
-                      placeholder={selected.apiKeyConfigured ? t("已配置；留空保持不变") : t("输入 API Key")}
-                      type="password"
-                      value={selected.apiKeyUpdate}
-                    />
-                    <Button
-                      disabled={!selected.apiKeyConfigured && !selected.apiKeyUpdate}
-                      onClick={() => updateSelected({ removeApiKey: !selected.removeApiKey, apiKeyUpdate: "" })}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {selected.removeApiKey ? <RotateCcw className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
-                      {selected.removeApiKey ? t("撤销移除") : t("移除 Key")}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="grok-empty-editor">
-              <Bot className="h-5 w-5" />
-              <span>{t("选择或新增一个 Grok 模型")}</span>
-            </div>
-          )}
-        </Panel>
-      </div>
-
-      {dirty ? (
-        <div className="settings-save-bar grok-save-bar">
-          <span className={validationError ? "is-error" : ""}>{validationError || t("Grok 配置有未保存修改")}</span>
-          <Toolbar>
-            <Button disabled={saving} onClick={discard} variant="secondary">{t("放弃修改")}</Button>
-            <Button disabled={saving || Boolean(validationError)} onClick={() => void saveDraft()}>
-              <Save className="h-4 w-4" />
-              {saving ? t("保存中") : t("保存配置")}
-            </Button>
-          </Toolbar>
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -5212,36 +4001,11 @@ function EnhanceScreen({
               <FeatureToggle title={t("对话居中宽度")} detail={t("把主对话和输入框限制到固定最大宽度，适合大屏阅读。")} checked={form.codexAppConversationView} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppConversationView", value)} />
               <FeatureToggle title={t("切换对话保留位置")} detail={t("切换 thread 时恢复上一次浏览位置。")} checked={form.codexAppThreadScrollRestore} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppThreadScrollRestore", value)} />
             </FeatureGroup>
-            <FeatureGroup title="Stepwise" detail={t("基于当前对话生成下一步建议，使用独立 API 配置。")}>
-              <FeatureToggle title="Stepwise" detail={t("在 Codex 页面显示可拖动的后续建议浮层；建议由单独配置的 Stepwise API 生成。启停后需重启 Codex++ 生效。")} checked={form.codexAppStepwiseEnabled} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppStepwiseEnabled", value)} />
-              <FeatureToggle title={t("Stepwise 直接发送")} detail={t("点击建议后自动发送；关闭时只填入输入框。")} checked={form.codexAppStepwiseDirectSend} disabled={!masterEnabled || !form.codexAppStepwiseEnabled} onChange={(value) => setEnhanceFlag("codexAppStepwiseDirectSend", value)} />
-            </FeatureGroup>
             <FeatureGroup title={t("界面与启动")} detail={t("控制语言、启动速度和 Codex 原生界面调整。")}>
               {isWindowsPlatform ? <FeatureToggle title={t("桌宠跟随真实鼠标")} detail={t("仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。")} checked={form.codexAppPetRealMouseLook} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppPetRealMouseLook", value)} /> : null}
               <FeatureToggle title={t("强制中文界面")} detail={t("强制启用 Codex App 内置 zh-CN 语言包，避免 Statsig/VPN 不通时回退英文。需重启 Codex 才能完整生效。")} checked={form.codexAppForceChineseLocale} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppForceChineseLocale", value)} />
               <FeatureToggle title={t("快速启动")} detail={t("默认关闭；无 VPN 时可开启，让 Statsig 初始化快速失败，减少启动时长。需重启 Codex 才生效。")} checked={form.codexAppFastStartup} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastStartup", value)} />
               <FeatureToggle title={t("原生菜单汉化")} detail={t("启动时通过本地主进程调试端口汉化 Codex 原生菜单；不修改安装包。需重启 Codex 才生效。")} checked={form.codexAppNativeMenuLocalization} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeMenuLocalization", value)} />
-            </FeatureGroup>
-            <FeatureGroup title={t("远程项目")} detail={t("连接 Zed Remote 和 upstream worktree 辅助能力。")}>
-              <FeatureToggle title="Zed Remote open" detail={t("远程 SSH 文件引用可直接用 Zed Remote Development 打开。")} checked={form.codexAppZedRemoteOpen} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppZedRemoteOpen", value)} />
-              <FeatureToggle title={t("Zed 项目记录")} detail={t("维护 Codex++ 自己的远程项目最近列表。")} checked={form.zedRemoteProjectRegistryEnabled} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("zedRemoteProjectRegistryEnabled", value)} />
-              <FeatureToggle title={t("同步 Zed settings")} detail={t("高级选项，默认关闭；当前实现不主动改写 Zed settings。")} checked={form.zedRemoteSyncToZedSettings} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("zedRemoteSyncToZedSettings", value)} />
-              <FeatureToggle title="Upstream worktree" detail={t("从最新 upstream 分支创建 Git worktree。")} checked={form.codexAppUpstreamWorktreeCreate} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppUpstreamWorktreeCreate", value)} />
-              <div className="feature-select-row">
-                <Field label={t("Zed 默认打开策略")}>
-                  <AppSelect
-                    disabled={!masterEnabled}
-                    onChange={(value) => onFormChange({ ...form, zedRemoteOpenStrategy: value })}
-                    options={[
-                      { value: "addToFocusedWorkspace", label: t("加入当前工作区") },
-                      { value: "reuseWindow", label: t("复用窗口") },
-                      { value: "newWindow", label: t("新窗口") },
-                      { value: "default", label: t("Zed 默认行为") },
-                    ]}
-                    value={form.zedRemoteOpenStrategy}
-                  />
-                </Field>
-              </div>
             </FeatureGroup>
           </div>
           <div className="enhance-utility-row">
@@ -5271,1100 +4035,6 @@ function EnhanceScreen({
         </CardContent>
       </Panel>
     </>
-  );
-}
-
-function DreamSkinScreen({
-  form,
-  library,
-  market,
-  community,
-  draft,
-  dirty,
-  pendingRestart,
-  selectedTheme,
-  status,
-  verification,
-  onFormChange,
-  onDraftChange,
-  actions,
-}: {
-  form: BackendSettings;
-  library: DreamSkinThemeLibrary | null;
-  market: DreamSkinMarketResult | null;
-  community: DreamSkinCommunityResult | null;
-  draft: DreamSkinThemeDraft | null;
-  dirty: boolean;
-  pendingRestart: PendingDreamSkinRestart | null;
-  selectedTheme: string;
-  status: DreamSkinRuntimeResult | null;
-  verification: DreamSkinVerificationResult | null;
-  onFormChange: (value: BackendSettings) => void;
-  onDraftChange: (value: DreamSkinThemeDraft | null) => void;
-  actions: Actions;
-}) {
-  const [themeView, setThemeView] = useState<"market" | "community" | "local">("community");
-  const companionInputRef = useRef<HTMLInputElement>(null);
-  const [companionError, setCompanionError] = useState("");
-  const masterEnabled = form.enhancementsEnabled;
-  const theme = draft?.config ?? defaultDreamSkinTheme();
-  const themeColors = theme.colors ?? defaultDreamSkinColors();
-  const customImagePath = draft?.imagePath.trim() ?? "";
-  const previewUrl = customImagePath
-    ? convertFileSrc(customImagePath)
-    : isWindowsPlatform
-      ? dreamSkinWindowsPreviewUrl
-      : dreamSkinMacPreviewUrl;
-  const selectedItem = library?.themes.find((item) => item.key === selectedTheme) ?? null;
-  const savedThemeSelected = selectedItem?.kind === "stored";
-  const updateTheme = (next: DreamSkinThemeConfig) => {
-    if (draft) onDraftChange({ ...draft, config: next });
-  };
-  const updateThemeText = (
-    key: "id" | "name" | "brandSubtitle" | "tagline" | "projectPrefix" | "projectLabel" | "statusText" | "quote",
-    value: string,
-  ) => updateTheme({ ...theme, [key]: value });
-  const updateThemeColor = (key: keyof DreamSkinColors, value: string) => {
-    updateTheme({ ...theme, colors: { ...themeColors, [key]: value } });
-  };
-  const themeAppearance = theme.appearance === "light" || theme.appearance === "dark"
-    ? theme.appearance
-    : "auto";
-  const windowsAccent = typeof theme.palette?.accent === "string" ? theme.palette.accent : "";
-  const updateWindowsAccent = (value: string) => {
-    const palette = { ...(theme.palette ?? {}) };
-    if (value.trim()) palette.accent = value;
-    else delete palette.accent;
-    const next: DreamSkinThemeConfig = { ...theme, palette };
-    if (!Object.keys(palette).length) delete next.palette;
-    updateTheme(next);
-  };
-  const companion = theme.companion;
-  const companionDataUrl = typeof companion?.dataUrl === "string" ? companion.dataUrl : "";
-  const companionEnabled = Boolean(companionDataUrl) && companion?.enabled !== false;
-  const updateCompanion = (patch: Partial<NonNullable<DreamSkinThemeConfig["companion"]>>) => {
-    const nextCompanion = {
-      dataUrl: companionDataUrl,
-      enabled: companion?.enabled ?? true,
-      width: companion?.width ?? 96,
-      side: companion?.side ?? "right",
-      offsetX: companion?.offsetX ?? 0,
-      offsetY: companion?.offsetY ?? 4,
-      ...patch,
-    };
-    updateTheme({ ...theme, companion: nextCompanion });
-  };
-  const clearCompanion = () => {
-    const next = { ...theme };
-    delete next.companion;
-    setCompanionError("");
-    updateTheme(next);
-  };
-  const chooseCompanion = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = "";
-    if (!file) return;
-    if (!dreamSkinCompanionMimeTypes.has(file.type)) {
-      setCompanionError(t("仅支持 PNG、JPEG、WebP 或 GIF 图片"));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = typeof reader.result === "string" ? reader.result : "";
-      if (!dataUrl || dataUrl.length > dreamSkinCompanionDataUrlLimit) {
-        setCompanionError(t("图片过大，请选择 180 KB 以内的图片"));
-        return;
-      }
-      setCompanionError("");
-      updateCompanion({ dataUrl });
-    };
-    reader.onerror = () => setCompanionError(t("读取图片失败，请重新选择"));
-    reader.readAsDataURL(file);
-  };
-  const stateLabel = dreamSkinStateLabel(status?.state ?? "not_running");
-  const runtimeChecks = status?.checks ?? [];
-  const verificationChecks = verification?.checks ?? [];
-
-  return (
-    <>
-      <Panel className="dream-skin-panel dream-skin-attribution-panel">
-        <CardContent className="dream-skin-attribution-content">
-          <p className="dream-skin-attribution-line">
-            {t("项目来源：Fei-Away/Codex-Dream-Skin · 原作者 Fei-Away · MIT License · 第三方图片需自行确认授权")}
-          </p>
-        </CardContent>
-      </Panel>
-
-      <Panel className="dream-skin-panel">
-        <CardHead title={t("运行状态")} detail={t("配置保存在 Codex++，实时操作通过本机回环 CDP 执行")} />
-        <CardContent>
-          <div className="dream-skin-runtime-grid">
-            <label className="switch-row compact">
-              <input
-                checked={form.codexAppDreamSkinEnabled}
-                disabled={!masterEnabled}
-                onChange={(event) => onFormChange({
-                  ...form,
-                  codexAppDreamSkinEnabled: event.currentTarget.checked,
-                  codexAppDreamSkinPaused: false,
-                })}
-                type="checkbox"
-              />
-              <span>
-                <strong>{t("启用 Codex 皮肤")}</strong>
-                <small>{t("应用会保存当前图片与主题配置；恢复原始外观不会删除主题。")}</small>
-              </span>
-              <ToggleVisual />
-            </label>
-            <div className={`dream-skin-runtime-state is-${status?.state ?? "not_running"}`}>
-              {dreamSkinCheckIcon(status?.state === "pass" ? "pass" : status?.state === "fail" ? "fail" : "warning")}
-              <span>
-                <small>{t("当前状态")}</small>
-                <strong>{stateLabel}</strong>
-              </span>
-              <Badge status={status?.liveApplied ? "ok" : status?.paused ? "disabled" : "not_checked"} />
-            </div>
-          </div>
-          {!masterEnabled ? (
-            <div className="hint-line">
-              <Info className="h-4 w-4" />
-              <span>{t("请先在 Codex增强 页面开启总开关。")}</span>
-            </div>
-          ) : null}
-          <Toolbar>
-            <Button disabled={!masterEnabled || !draft} onClick={() => void actions.activateDreamSkinTheme()} title={t("保存并应用主题；需要重启时只会标记为待应用")}>
-              <Play className="h-4 w-4" />
-              {t("应用皮肤")}
-            </Button>
-            <Button variant="outline" onClick={() => void actions.restoreDreamSkin()}>
-              <RotateCcw className="h-4 w-4" />
-              {t("恢复 Codex 外观")}
-            </Button>
-            <Button size="icon" title={t("刷新状态")} variant="outline" onClick={() => void actions.refreshDreamSkinStatus()}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </Toolbar>
-          {pendingRestart ? (
-            <div className="dream-skin-pending-state" role="status">
-              <Rocket className="h-5 w-5" aria-hidden="true" />
-              <div>
-                <strong>{t("待应用主题")}：{pendingRestart.pendingThemeName}</strong>
-                <small>
-                  {t("当前运行")}：{pendingRestart.currentThemeName}。{t("配置已保存，可以继续浏览和编辑，稍后重启即可生效。")}
-                </small>
-              </div>
-              <Button onClick={() => void actions.restart()}>
-                <Rocket className="h-4 w-4" />
-                {t("重启并应用")}
-              </Button>
-            </div>
-          ) : null}
-        </CardContent>
-      </Panel>
-
-      <Panel className="dream-skin-panel">
-        <CardHead title={t("图片与主题")} detail={t("自定义图片会被导入 Codex++ 托管目录；主题字段与目标项目 theme.json 对齐")} />
-        <CardContent>
-          <div aria-label={t("主题视图")} className="dream-skin-view-tabs" role="tablist">
-            <button
-              aria-selected={themeView === "community"}
-              className={themeView === "community" ? "is-active" : ""}
-              onClick={() => setThemeView("community")}
-              role="tab"
-              type="button"
-            >
-              <Github className="h-4 w-4" />
-              {t("DreamSkin 社区")}
-              <span>{community?.items.length ?? 0}</span>
-            </button>
-            <button
-              aria-selected={themeView === "market"}
-              className={themeView === "market" ? "is-active" : ""}
-              onClick={() => setThemeView("market")}
-              role="tab"
-              type="button"
-            >
-              <Store className="h-4 w-4" />
-              {t("主题市场")}
-              <span>{market?.themes.length ?? 0}</span>
-            </button>
-            <button
-              aria-selected={themeView === "local"}
-              className={themeView === "local" ? "is-active" : ""}
-              onClick={() => setThemeView("local")}
-              role="tab"
-              type="button"
-            >
-              <Palette className="h-4 w-4" />
-              {t("我的主题")}
-              <span>{library?.themes.length ?? 0}</span>
-            </button>
-          </div>
-
-          {themeView === "community" ? (
-            <DreamSkinCommunitySection
-              community={community}
-              actions={actions}
-              onInstalled={() => setThemeView("local")}
-            />
-          ) : themeView === "market" ? (
-            <section className="dream-skin-market">
-              <div className="dream-skin-library-head">
-                <div>
-                  <strong>{t("社区主题")}</strong>
-                  <small>
-                    {market?.updatedAt
-                      ? tf("清单更新于 {0}，安装后会保存到“我的主题”。", [market.updatedAt])
-                      : t("从 CodexPlusPlus-Themes 仓库加载可安装主题。")}
-                  </small>
-                </div>
-                <Toolbar>
-                  <Button onClick={() => void actions.refreshDreamSkinMarket()} variant="secondary">
-                    <RefreshCw className="h-4 w-4" />
-                    {t("刷新市场")}
-                  </Button>
-                  <Button onClick={() => void actions.openExternalUrl(market?.repositoryUrl || "https://github.com/BigPizzaV3/CodexPlusPlus-Themes")} variant="outline">
-                    <Github className="h-4 w-4" />
-                    {t("投稿主题")}
-                  </Button>
-                </Toolbar>
-              </div>
-              {market?.cached || market?.warning ? (
-                <div className="dream-skin-market-warning">
-                  <Info className="h-4 w-4" />
-                  <span>{market.warning || t("远程仓库暂不可用，当前显示本地缓存。")}</span>
-                </div>
-              ) : null}
-              {market?.themes.length ? (
-                <div className="dream-skin-market-grid">
-                  {market.themes.map((item) => (
-                    <DreamSkinMarketCard
-                      actions={actions}
-                      key={item.id}
-                      onInstalled={() => setThemeView("local")}
-                      theme={item}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="empty">
-                  {market?.status === "failed" ? market.message : t("正在加载主题市场…")}
-                </div>
-              )}
-            </section>
-          ) : (
-            <>
-          <section className="dream-skin-theme-library">
-            <div className="dream-skin-library-head">
-              <div>
-                <strong>{t("我的主题")}</strong>
-                <small>
-                  {pendingRestart
-                    ? t("选择其他卡片可继续调整待应用主题；当前界面不会自动重启。")
-                    : t("选择卡片只会载入草稿；需要完整切换时会保存为待应用主题。")}
-                </small>
-              </div>
-              <Toolbar>
-                <Button variant="outline" onClick={() => void actions.importDreamSkinThemePackage()}>
-                  <PackageOpen className="h-4 w-4" />
-                  {t("导入主题包")}
-                </Button>
-                <Button
-                  disabled={!masterEnabled || !draft}
-                  onClick={() => void actions.activateDreamSkinTheme()}
-                  title={t("保存主题；需要重启时不会打断当前操作")}
-                >
-                  <Play className="h-4 w-4" />
-                  {pendingRestart ? t("更新待应用") : t("应用主题")}
-                </Button>
-              </Toolbar>
-            </div>
-            <div className="dream-skin-theme-list">
-              {(library?.themes ?? []).map((item) => {
-                const cardPreview = item.previewPath
-                  ? convertFileSrc(item.previewPath)
-                  : isWindowsPlatform
-                    ? dreamSkinWindowsPreviewUrl
-                    : dreamSkinMacPreviewUrl;
-                const cardDirty = item.key === selectedTheme && dirty;
-                const currentRunning = pendingRestart
-                  ? pendingRestart.currentThemeKey === item.key
-                  : item.active;
-                const pendingApplication = pendingRestart?.pendingThemeKey === item.key;
-                return (
-                  <article
-                    className={`dream-skin-theme-card${item.key === selectedTheme ? " is-selected" : ""}${currentRunning ? " is-current" : ""}${pendingApplication ? " is-pending" : ""}`}
-                    key={item.key}
-                  >
-                    <button
-                      className="dream-skin-theme-select"
-                      onClick={() => actions.selectDreamSkinTheme(item)}
-                      type="button"
-                    >
-                      <span className="dream-skin-theme-image">
-                        <img alt={item.name} loading="lazy" src={cardPreview} />
-                        {currentRunning || pendingApplication ? (
-                          <span className="dream-skin-theme-badges">
-                            {currentRunning ? <b>{t("当前运行")}</b> : null}
-                            {pendingApplication ? <b className="is-pending">{t("待应用")}</b> : null}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="dream-skin-theme-copy">
-                        <strong title={item.name}>{item.name}</strong>
-                        <small>
-                          {item.builtin
-                            ? t("内置主题")
-                            : item.kind === "activeUnsaved"
-                              ? t("当前未保存主题")
-                              : t("用户主题")}
-                        </small>
-                      </span>
-                      {item.modified || cardDirty ? <em>{t("已修改")}</em> : null}
-                    </button>
-                    {item.kind === "stored" ? (
-                      <details className="dream-skin-theme-menu">
-                        <summary title={t("主题操作")}><MoreHorizontal className="h-4 w-4" /></summary>
-                        <div>
-                          <button onClick={() => void actions.renameDreamSkinTheme(item)} type="button">
-                            <Edit3 className="h-4 w-4" />
-                            {t("重命名")}
-                          </button>
-                          <button disabled={item.active || currentRunning} onClick={() => void actions.deleteDreamSkinTheme(item)} type="button">
-                            <Trash2 className="h-4 w-4" />
-                            {t("删除")}
-                          </button>
-                        </div>
-                      </details>
-                    ) : null}
-                  </article>
-                );
-              })}
-            </div>
-            {!library ? <p className="empty">{t("正在加载主题库…")}</p> : null}
-          </section>
-
-          <details className="dream-skin-customizer">
-            <summary>
-              <span className="dream-skin-customizer-title">
-                <Settings className="h-4 w-4" />
-                <span>
-                  <strong>{t("自定义主题")}</strong>
-                  <small>{t("图片、文字和配色等高级编辑项")}</small>
-                </span>
-              </span>
-              <em className={dirty ? "is-dirty" : ""}>{dirty ? t("有未保存修改") : t("按需展开")}</em>
-            </summary>
-            <div className="dream-skin-customizer-content">
-              <div className="dream-skin-customizer-actions">
-                <Button variant="secondary" onClick={() => void actions.createDreamSkinTheme()}>
-                  <ImagePlus className="h-4 w-4" />
-                  {t("从图片创建")}
-                </Button>
-              </div>
-
-              <div className="dream-skin-platform-note">
-                <Info className="h-4 w-4" />
-                <span>
-                  {isWindowsPlatform
-                    ? t("Windows 使用亮暗模式、图片取色和可选强调色；完整色板仅在 macOS 生效。")
-                    : t("macOS 会应用主题中的图片、文字和颜色配置。")}
-                </span>
-              </div>
-
-              <div className="dream-skin-companion-controls">
-                <div className="dream-skin-companion-heading">
-                  <div>
-                    <strong>{t("输入框旁照片")}</strong>
-                    <small>{t("为主题选择一张显示在 Codex 输入框旁的自定义照片")}</small>
-                  </div>
-                  {companionDataUrl ? (
-                    <img alt={t("输入框旁照片预览")} src={companionDataUrl} />
-                  ) : null}
-                </div>
-                <input
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="sr-only"
-                  onChange={chooseCompanion}
-                  ref={companionInputRef}
-                  type="file"
-                />
-                <Toolbar>
-                  <Button onClick={() => companionInputRef.current?.click()} type="button" variant="secondary">
-                    <Camera className="h-4 w-4" />
-                    {companionDataUrl ? t("更换照片") : t("选择照片")}
-                  </Button>
-                  <Button disabled={!companionDataUrl} onClick={clearCompanion} type="button" variant="outline">
-                    <Trash2 className="h-4 w-4" />
-                    {t("清除照片")}
-                  </Button>
-                </Toolbar>
-                {companionError ? <small className="dream-skin-companion-error">{companionError}</small> : null}
-                <div className="dream-skin-companion-fields">
-                  <label className="switch-row compact">
-                    <input
-                      checked={companionEnabled}
-                      disabled={!companionDataUrl}
-                      onChange={(event) => updateCompanion({ enabled: event.currentTarget.checked })}
-                      type="checkbox"
-                    />
-                    <span>
-                      <strong>{t("显示在输入框旁")}</strong>
-                      <small>{t("应用主题后显示在输入框的左侧或右侧")}</small>
-                    </span>
-                    <ToggleVisual />
-                  </label>
-                  <Field label={t("照片宽度") }>
-                    <Input
-                      disabled={!companionDataUrl}
-                      inputMode="numeric"
-                      max={160}
-                      min={48}
-                      type="number"
-                      value={companion?.width ?? 96}
-                      onChange={(event) => updateCompanion({ width: Math.max(48, Math.min(160, Number(event.currentTarget.value) || 96)) })}
-                    />
-                  </Field>
-                  <Field label={t("显示位置") }>
-                    <AppSelect
-                      disabled={!companionDataUrl}
-                      value={companion?.side ?? "right"}
-                      onChange={(value) => updateCompanion({ side: value })}
-                      options={[
-                        { value: "auto", label: t("自动") },
-                        { value: "left", label: t("左侧") },
-                        { value: "right", label: t("右侧") },
-                      ]}
-                    />
-                  </Field>
-                  <Field label={t("水平偏移") }>
-                    <Input
-                      disabled={!companionDataUrl}
-                      inputMode="numeric"
-                      max={48}
-                      min={-48}
-                      type="number"
-                      value={companion?.offsetX ?? 0}
-                      onChange={(event) => updateCompanion({ offsetX: Math.max(-48, Math.min(48, Number(event.currentTarget.value) || 0)) })}
-                    />
-                  </Field>
-                  <Field label={t("垂直偏移") }>
-                    <Input
-                      disabled={!companionDataUrl}
-                      inputMode="numeric"
-                      max={160}
-                      min={-160}
-                      type="number"
-                      value={companion?.offsetY ?? 4}
-                      onChange={(event) => updateCompanion({ offsetY: Math.max(-160, Math.min(160, Number(event.currentTarget.value) || 0)) })}
-                    />
-                  </Field>
-                </div>
-              </div>
-
-              <div className="dream-skin-editor-layout">
-                <div className="dream-skin-media-editor">
-                  <div
-                    className="dream-skin-preview"
-                    style={isWindowsPlatform ? undefined : { backgroundColor: themeColors.background }}
-                  >
-                    <img alt={t("Dream Skin 图片预览")} src={previewUrl} />
-                    <span style={isWindowsPlatform ? undefined : { backgroundColor: themeColors.panel, color: themeColors.text }}>
-                      <strong>{theme.name}</strong>
-                      <small style={isWindowsPlatform ? undefined : { color: themeColors.muted }}>{customImagePath ? t("自定义托管图片") : t("目标项目默认图片")}</small>
-                    </span>
-                  </div>
-                  <Field label={t("托管图片路径")}>
-                    <Input
-                      readOnly
-                      placeholder={t("使用目标项目默认图片")}
-                      value={draft?.imagePath ?? ""}
-                    />
-                  </Field>
-                  <Toolbar>
-                    <Button variant="secondary" onClick={() => void actions.chooseDreamSkinImagePath()}>
-                      <Camera className="h-4 w-4" />
-                      {t("导入图片")}
-                    </Button>
-                    <Button
-                      disabled={!customImagePath}
-                      variant="outline"
-                      onClick={() => void actions.resetDreamSkinImage()}
-                    >
-                      <RotateCcw className="h-4 w-4" />
-                      {t("恢复默认图片")}
-                    </Button>
-                  </Toolbar>
-                </div>
-
-                <div className="dream-skin-theme-fields">
-                  <div className="dream-skin-text-grid">
-                    <Field label={t("主题 ID")}><Input readOnly={draft?.builtin || savedThemeSelected} value={theme.id} onChange={(event) => updateThemeText("id", event.currentTarget.value)} /></Field>
-                    <Field label={t("主题名称")}><Input value={theme.name} onChange={(event) => updateThemeText("name", event.currentTarget.value)} /></Field>
-                    <Field label={t("品牌副标题")}><Input value={theme.brandSubtitle} onChange={(event) => updateThemeText("brandSubtitle", event.currentTarget.value)} /></Field>
-                    <Field label={t("主题标语")}><Input value={theme.tagline} onChange={(event) => updateThemeText("tagline", event.currentTarget.value)} /></Field>
-                    <Field label={t("项目前缀")}><Input value={theme.projectPrefix} onChange={(event) => updateThemeText("projectPrefix", event.currentTarget.value)} /></Field>
-                    <Field label={t("项目按钮文字")}><Input value={theme.projectLabel} onChange={(event) => updateThemeText("projectLabel", event.currentTarget.value)} /></Field>
-                    <Field label={t("状态文字")}><Input value={theme.statusText} onChange={(event) => updateThemeText("statusText", event.currentTarget.value)} /></Field>
-                    <Field label={t("引用文字")}><Input value={theme.quote} onChange={(event) => updateThemeText("quote", event.currentTarget.value)} /></Field>
-                  </div>
-                  {isWindowsPlatform ? (
-                    <div className="dream-skin-windows-theme-controls">
-                      <Field label={t("外观模式")}>
-                        <div aria-label={t("外观模式")} className="segmented dream-skin-appearance-options" role="group">
-                          {([
-                            ["auto", t("自动")],
-                            ["light", t("亮色")],
-                            ["dark", t("暗色")],
-                          ] as const).map(([value, label]) => (
-                            <button
-                              aria-pressed={themeAppearance === value}
-                              className={themeAppearance === value ? "active" : ""}
-                              key={value}
-                              onClick={() => updateTheme({ ...theme, appearance: value })}
-                              type="button"
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </Field>
-                      <div className="dream-skin-windows-accent">
-                        <DreamSkinColorField
-                          label={t("强调色")}
-                          value={windowsAccent}
-                          onChange={updateWindowsAccent}
-                        />
-                        <Button
-                          disabled={!windowsAccent.trim()}
-                          onClick={() => updateWindowsAccent("")}
-                          size="sm"
-                          variant="outline"
-                        >
-                          <RotateCcw className="h-4 w-4" />
-                          {t("跟随图片配色")}
-                        </Button>
-                      </div>
-                      <small className="dream-skin-windows-theme-note">
-                        {t("亮暗模式直接控制 Codex 外观；强调色留空时自动从主题图片提取。")}
-                      </small>
-                    </div>
-                  ) : (
-                    <div className="dream-skin-colors">
-                      {dreamSkinColorFields().map(([key, label]) => (
-                        <DreamSkinColorField
-                          key={key}
-                          label={label}
-                          value={String(themeColors[key])}
-                          onChange={(value) => updateThemeColor(key, value)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <Toolbar>
-                <Button disabled={!draft} onClick={() => void actions.saveDreamSkinTheme()}>
-                  <Save className="h-4 w-4" />
-                  {draft?.builtin || selectedItem?.kind === "activeUnsaved" ? t("保存为新主题") : t("保存主题")}
-                </Button>
-                <Button variant="outline" onClick={() => void actions.resetDreamSkinTheme()}>
-                  <RotateCcw className="h-4 w-4" />
-                  {isWindowsPlatform ? t("恢复 Codex 默认配色") : t("恢复 Dream Skin 默认主题")}
-                </Button>
-              </Toolbar>
-            </div>
-          </details>
-            </>
-          )}
-        </CardContent>
-      </Panel>
-
-      <Panel className="dream-skin-panel">
-        <CardHead title={t("诊断与验证")} detail={t("检查官方应用身份、CDP renderer、目标样式和页面布局")} />
-        <CardContent>
-          <div className="dream-skin-diagnostics-grid">
-            <DreamSkinCheckList title={t("运行诊断")} checks={runtimeChecks} emptyText={t("刷新状态后显示运行诊断。")}/>
-            <DreamSkinCheckList title={t("最近实机验证")} checks={verificationChecks} emptyText={t("运行实机验证后显示页面检查结果。")}/>
-          </div>
-          {verification ? (
-            <div className="dream-skin-verification-meta">
-              <span><small>{t("注入版本")}</small><code>{verification.version || t("未检测到")}</code></span>
-              <span><small>{t("截图路径")}</small><code>{verification.screenshotPath || t("未保存截图")}</code></span>
-            </div>
-          ) : null}
-          <Toolbar>
-            <Button variant="secondary" onClick={() => void actions.refreshDreamSkinStatus()}>
-              <RefreshCw className="h-4 w-4" />
-              {t("刷新诊断")}
-            </Button>
-            <Button onClick={() => void actions.verifyDreamSkin()}>
-              <ShieldCheck className="h-4 w-4" />
-              {t("实机验证")}
-            </Button>
-            <Button variant="outline" onClick={() => void actions.saveDreamSkinScreenshot()}>
-              <Camera className="h-4 w-4" />
-              {t("保存截图")}
-            </Button>
-          </Toolbar>
-        </CardContent>
-      </Panel>
-    </>
-  );
-}
-
-function DreamSkinColorField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <Field className="dream-skin-color-field" label={label}>
-      <span className="dream-skin-color-control">
-        <input
-          aria-label={label}
-          type="color"
-          value={dreamSkinPickerColor(value)}
-          onChange={(event) => onChange(event.currentTarget.value.toUpperCase())}
-        />
-        <Input value={value} onChange={(event) => onChange(event.currentTarget.value)} />
-      </span>
-    </Field>
-  );
-}
-
-function DreamSkinMarketCard({
-  theme,
-  actions,
-  onInstalled,
-}: {
-  theme: DreamSkinMarketTheme;
-  actions: Actions;
-  onInstalled: () => void;
-}) {
-  const status = theme.updateAvailable
-    ? t("可更新")
-    : theme.installed
-      ? theme.installedVersion
-        ? tf("已安装 {0}", [theme.installedVersion])
-        : t("已安装")
-      : t("未安装");
-  return (
-    <article className="dream-skin-market-card">
-      <div className="dream-skin-market-preview">
-        <img
-          alt={theme.name}
-          loading="lazy"
-          onError={(event) => {
-            event.currentTarget.onerror = null;
-            event.currentTarget.src = isWindowsPlatform ? dreamSkinWindowsPreviewUrl : dreamSkinMacPreviewUrl;
-          }}
-          src={theme.previewUrl}
-        />
-        <UiBadge variant={theme.updateAvailable ? "default" : theme.installed ? "secondary" : "outline"}>{status}</UiBadge>
-      </div>
-      <div className="dream-skin-market-copy">
-        <div className="dream-skin-market-title">
-          <strong title={theme.name}>{theme.name}</strong>
-          <span>v{theme.version}</span>
-        </div>
-        <small>{tf("作者：{0} · {1}", [theme.author, theme.license])}</small>
-        <p>{theme.description || t("暂无主题说明。")}</p>
-        <div className="dream-skin-market-tags">
-          {theme.tags.map((tag) => <span key={tag}>{tag}</span>)}
-        </div>
-      </div>
-      <div className="dream-skin-market-actions">
-        <Button
-          onClick={async () => {
-            if (await actions.installDreamSkinMarketTheme(theme)) onInstalled();
-          }}
-          size="sm"
-        >
-          <Download className="h-4 w-4" />
-          {theme.updateAvailable ? t("更新") : theme.installed ? t("重新安装") : t("安装")}
-        </Button>
-        <Button onClick={() => void actions.openExternalUrl(theme.sourceUrl)} size="sm" variant="outline">
-          <ExternalLink className="h-4 w-4" />
-          {t("来源")}
-        </Button>
-      </div>
-    </article>
-  );
-}
-
-function DreamSkinCommunitySection({
-  community,
-  actions,
-  onInstalled,
-}: {
-  community: DreamSkinCommunityResult | null;
-  actions: Actions;
-  onInstalled: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<"latest" | "popular" | "name">("latest");
-  const items = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    const filtered = (community?.items ?? []).filter((item) => {
-      if (!normalized) return true;
-      return [item.name, item.authorDisplayName, item.themeId, item.license]
-        .some((value) => value.toLowerCase().includes(normalized));
-    });
-    return [...filtered].sort((left, right) => {
-      if (sort === "popular") return right.downloadCount - left.downloadCount;
-      if (sort === "name") return left.name.localeCompare(right.name, "zh-CN");
-      return right.reviewedAt.localeCompare(left.reviewedAt);
-    });
-  }, [community?.items, query, sort]);
-
-  return (
-    <section className="dream-skin-community">
-      <div className="dream-skin-library-head">
-        <div>
-          <strong>{t("DreamSkin 社区主题")}</strong>
-          <small>
-            {community?.total
-              ? tf("来自 DreamSkin.cc 的已审核主题，共 {0} 套；安装前仍会在本机再次校验。", [String(community.total)])
-              : t("从 DreamSkin.cc 加载已审核主题包。")}
-          </small>
-        </div>
-        <Toolbar>
-          <Button onClick={() => void actions.refreshDreamSkinCommunity()} variant="secondary">
-            <RefreshCw className="h-4 w-4" />
-            {t("刷新社区")}
-          </Button>
-          <Button onClick={() => void actions.openExternalUrl("https://dreamskin.cc/gallery")} variant="outline">
-            <ExternalLink className="h-4 w-4" />
-            {t("在线主题库")}
-          </Button>
-          <Button onClick={() => void actions.openExternalUrl("https://dreamskin.cc/studio")} variant="outline">
-            <Palette className="h-4 w-4" />
-            {t("在线 Studio")}
-          </Button>
-        </Toolbar>
-      </div>
-      {community?.warning ? (
-        <div className="dream-skin-market-warning">
-          <Info className="h-4 w-4" />
-          <span>{community.warning}</span>
-        </div>
-      ) : null}
-      <div className="dream-skin-community-controls">
-        <Input
-          aria-label={t("搜索社区主题")}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder={t("搜索主题名称、作者或许可证")}
-          value={query}
-        />
-        <AppSelect
-          onChange={(value) => setSort(value as typeof sort)}
-          options={[
-            { value: "latest", label: t("最新审核") },
-            { value: "popular", label: t("下载最多") },
-            { value: "name", label: t("名称排序") },
-          ]}
-          title={t("社区主题排序")}
-          value={sort}
-        />
-      </div>
-      {items.length ? (
-        <div className="dream-skin-community-grid">
-          {items.map((item) => (
-            <DreamSkinCommunityCard
-              actions={actions}
-              key={item.id}
-              onInstalled={onInstalled}
-              theme={item}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="empty">
-          {!community
-            ? t("正在加载 DreamSkin 社区…")
-            : community.status === "failed"
-              ? community.message
-              : query.trim()
-                ? t("没有匹配的社区主题。")
-                : t("DreamSkin 社区暂时没有可用主题。")}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function DreamSkinCommunityCard({
-  theme,
-  actions,
-  onInstalled,
-}: {
-  theme: DreamSkinCommunityTheme;
-  actions: Actions;
-  onInstalled: () => void;
-}) {
-  const status = theme.updateAvailable
-    ? t("可更新")
-    : theme.installed
-      ? tf("已安装 {0}", [theme.installedVersion])
-      : t("未安装");
-  const packageSize = theme.packageBytes >= 1024 * 1024
-    ? `${(theme.packageBytes / 1024 / 1024).toFixed(1)} MiB`
-    : `${Math.ceil(theme.packageBytes / 1024)} KiB`;
-  return (
-    <article className="dream-skin-community-card">
-      <div className="dream-skin-community-preview">
-        <img
-          alt={theme.name}
-          loading="lazy"
-          onError={(event) => {
-            event.currentTarget.onerror = null;
-            event.currentTarget.src = isWindowsPlatform ? dreamSkinWindowsPreviewUrl : dreamSkinMacPreviewUrl;
-          }}
-          src={theme.previewUrl}
-        />
-        <UiBadge variant={theme.updateAvailable ? "default" : theme.installed ? "secondary" : "outline"}>{status}</UiBadge>
-      </div>
-      <div className="dream-skin-community-copy">
-        <div className="dream-skin-market-title">
-          <strong title={theme.name}>{theme.name}</strong>
-          <span>v{theme.version}</span>
-        </div>
-        <small>{tf("作者：{0} · {1} · {2} 次下载", [theme.authorDisplayName, theme.license, String(theme.downloadCount)])}</small>
-        <small>{tf("主题包：{0}", [packageSize])}</small>
-      </div>
-      <div className="dream-skin-community-actions">
-        <Button
-          disabled={!theme.applyCompatible}
-          onClick={async () => {
-            if (await actions.installDreamSkinCommunityTheme(theme)) onInstalled();
-          }}
-          size="sm"
-          title={theme.applyCompatible ? t("下载、校验并安装主题包") : t("此主题仅支持在线预览或下载")}
-        >
-          <Download className="h-4 w-4" />
-          {theme.updateAvailable ? t("更新") : theme.installed ? t("重新安装") : t("安装")}
-        </Button>
-        <Button onClick={() => void actions.openExternalUrl(`https://dreamskin.cc/preview?themeVersion=${encodeURIComponent(theme.id)}`)} size="sm" variant="outline">
-          <Eye className="h-4 w-4" />
-          {t("预览")}
-        </Button>
-      </div>
-    </article>
-  );
-}
-
-function DreamSkinCheckList({ title, checks, emptyText }: { title: string; checks: DreamSkinCheck[]; emptyText: string }) {
-  return (
-    <section className="dream-skin-check-section">
-      <strong>{title}</strong>
-      <div className="dream-skin-check-list">
-        {checks.length ? checks.map((check) => (
-          <div className={`dream-skin-check is-${check.level}`} key={`${title}-${check.id}`}>
-            {dreamSkinCheckIcon(check.level)}
-            <span>
-              <strong>{check.label}</strong>
-              <small>{check.message}</small>
-            </span>
-            <b>{dreamSkinCheckLevelLabel(check.level)}</b>
-          </div>
-        )) : <p className="empty">{emptyText}</p>}
-      </div>
-    </section>
-  );
-}
-
-function dreamSkinColorFields(): Array<[keyof DreamSkinColors, string]> {
-  return [
-    ["background", t("背景色")],
-    ["panel", t("面板色")],
-    ["panelAlt", t("次级面板色")],
-    ["accent", t("强调色")],
-    ["accentAlt", t("次级强调色")],
-    ["secondary", t("辅助色")],
-    ["highlight", t("高亮色")],
-    ["text", t("文字色")],
-    ["muted", t("弱化文字色")],
-    ["line", t("边线色")],
-  ];
-}
-
-function dreamSkinPickerColor(value: string): string {
-  const color = value.trim();
-  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(color);
-  if (hex) {
-    const digits = hex[1];
-    return digits.length === 3
-      ? `#${digits.split("").map((part) => `${part}${part}`).join("")}`
-      : `#${digits.slice(0, 6)}`;
-  }
-  const rgb = /^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/i.exec(color);
-  if (!rgb) return "#808080";
-  const channel = (raw: string) => Math.max(0, Math.min(255, Math.round(Number(raw)))).toString(16).padStart(2, "0");
-  return `#${channel(rgb[1])}${channel(rgb[2])}${channel(rgb[3])}`;
-}
-
-function dreamSkinCheckIcon(level: "pass" | "warning" | "fail") {
-  if (level === "pass") return <CheckCircle2 aria-hidden="true" className="h-4 w-4" />;
-  if (level === "fail") return <ShieldAlert aria-hidden="true" className="h-4 w-4" />;
-  return <Info aria-hidden="true" className="h-4 w-4" />;
-}
-
-function dreamSkinCheckLevelLabel(level: "pass" | "warning" | "fail"): string {
-  if (level === "pass") return t("通过");
-  if (level === "fail") return t("失败");
-  return t("警告");
-}
-
-function dreamSkinStateLabel(state: "pass" | "warning" | "fail" | "not_running"): string {
-  if (state === "pass") return t("已应用并通过检查");
-  if (state === "warning") return t("需要处理");
-  if (state === "fail") return t("验证失败");
-  return t("Codex 未运行或不可连接");
-}
-
-function ZedRemoteScreen({
-  projects,
-  form,
-  onFormChange,
-  actions,
-}: {
-  projects: ZedRemoteProjectsResult | null;
-  form: BackendSettings;
-  onFormChange: (value: BackendSettings) => void;
-  actions: Actions;
-}) {
-  const allProjects = projects?.projects ?? [];
-  const currentProjects = allProjects.filter((project) => project.isCurrent);
-  const currentIds = new Set(currentProjects.map((project) => project.id));
-  const recentProjects = allProjects.filter((project) => !currentIds.has(project.id) && (project.source === "recent" || project.lastOpenedAtMs));
-  const recentIds = new Set(recentProjects.map((project) => project.id));
-  const discoveredProjects = allProjects.filter((project) => !currentIds.has(project.id) && !recentIds.has(project.id));
-  const copyUrl = async (project: ZedRemoteProject) => {
-    try {
-      await navigator.clipboard.writeText(project.url);
-      await actions.showMessage("Zed Remote URL", t("ssh:// URL 已复制。"), "ok");
-    } catch (error) {
-      await actions.showMessage(t("复制失败"), stringifyError(error), "failed");
-    }
-  };
-  return (
-    <>
-      <Panel>
-        <CardHead title={t("Zed 远程项目")} detail={tf("{0} 个 Codex++ 可识别项目，默认策略：{1}", [allProjects.length, zedStrategyLabel(form.zedRemoteOpenStrategy)])} />
-        <CardContent>
-          <div className="metric-list">
-            <Metric label="Current" value={String(currentProjects.length)} />
-            <Metric label="Recent" value={String(recentProjects.length)} />
-            <Metric label="Discovered" value={String(discoveredProjects.length)} />
-          </div>
-          <div className="zed-remote-settings">
-            <Field label={t("默认打开策略")}>
-              <AppSelect
-                onChange={(value) => onFormChange({ ...form, zedRemoteOpenStrategy: value })}
-                options={[
-                  { value: "addToFocusedWorkspace", label: t("加入当前工作区") },
-                  { value: "reuseWindow", label: t("复用窗口") },
-                  { value: "newWindow", label: t("新窗口") },
-                  { value: "default", label: t("Zed 默认行为") },
-                ]}
-                value={form.zedRemoteOpenStrategy}
-              />
-            </Field>
-            <label className="switch-row compact">
-              <input
-                checked={form.zedRemoteProjectRegistryEnabled}
-                onChange={(event) => onFormChange({ ...form, zedRemoteProjectRegistryEnabled: event.currentTarget.checked })}
-                type="checkbox"
-              />
-              <span>
-                <strong>{t("记录最近打开")}</strong>
-                <small>{t("保存到 Codex++ state，不改写 Zed settings。")}</small>
-              </span>
-              <ToggleVisual />
-            </label>
-          </div>
-          <Toolbar>
-            <Button onClick={() => void actions.refreshZedRemoteProjects()}>
-              <RefreshCw className="h-4 w-4" />
-              {t("刷新项目")}
-            </Button>
-            <Button variant="secondary" onClick={() => void actions.saveSettingsValue(form, false)}>
-              <Save className="h-4 w-4" />
-              {t("保存策略")}
-            </Button>
-          </Toolbar>
-        </CardContent>
-      </Panel>
-      <ZedRemoteProjectSection title="Current" projects={currentProjects} actions={actions} onCopyUrl={copyUrl} />
-      <ZedRemoteProjectSection title="Recent" projects={recentProjects} actions={actions} onCopyUrl={copyUrl} />
-      <ZedRemoteProjectSection title="Discovered from Codex" projects={discoveredProjects} actions={actions} onCopyUrl={copyUrl} />
-    </>
-  );
-}
-
-function ZedRemoteProjectSection({
-  title,
-  projects,
-  actions,
-  onCopyUrl,
-}: {
-  title: string;
-  projects: ZedRemoteProject[];
-  actions: Actions;
-  onCopyUrl: (project: ZedRemoteProject) => Promise<void>;
-}) {
-  return (
-    <Panel>
-      <CardHead title={title} detail={tf("{0} 个项目", [projects.length])} />
-      <CardContent>
-        {projects.length ? (
-          <div className="zed-remote-project-list">
-            {projects.map((project) => (
-              <div className="zed-remote-project-row" key={project.id}>
-                <div className="zed-remote-project-main">
-                  <div>
-                    <strong>{project.label}</strong>
-                    <span>{zedRemoteHostLabel(project)}</span>
-                  </div>
-                  <code>{project.path}</code>
-                  <small>
-                    {zedRemoteSourceLabel(project.source)}
-                    {project.lastOpenedAtMs ? ` · ${formatTime(project.lastOpenedAtMs)}` : ""}
-                  </small>
-                </div>
-                <div className="zed-remote-project-actions">
-                  <Button onClick={() => void actions.openZedRemoteProject(project, "addToFocusedWorkspace")} size="sm">
-                    <ExternalLink className="h-4 w-4" />
-                    {t("加入当前工作区")}
-                  </Button>
-                  <Button onClick={() => void actions.openZedRemoteProject(project, "reuseWindow")} size="sm" variant="outline">
-                    {t("复用窗口")}
-                  </Button>
-                  <Button onClick={() => void actions.openZedRemoteProject(project, "newWindow")} size="sm" variant="outline">
-                    {t("新窗口")}
-                  </Button>
-                  <Button onClick={() => void onCopyUrl(project)} size="icon" title={t("复制 ssh:// URL")} variant="ghost">
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                  {project.source === "recent" ? (
-                    <Button onClick={() => void actions.forgetZedRemoteProject(project)} size="icon" title={t("移除最近记录")} variant="ghost">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="empty">{t("暂无项目。")}</div>
-        )}
-      </CardContent>
-    </Panel>
   );
 }
 
@@ -6414,7 +4084,7 @@ function SkillsScreen({ skills, actions }: { skills: SkillsResult | null; action
       <Panel>
         <CardHead
           title={t("Skills 技能")}
-          detail={t("从 GitHub 仓库安装 Skill 到 Codex。启用后软链到 ~/.codex/skills/，下次对话即可用。")}
+          detail={t("从 GitHub 仓库安装 Skill 到 Codex。启用后软链到 ~/.agents/skills/，旧的 ~/.codex/skills/ 安装保持兼容。")}
         />
         <CardContent>
           <div className="metric-list">
@@ -6445,7 +4115,7 @@ function SkillsScreen({ skills, actions }: { skills: SkillsResult | null; action
           </Toolbar>
           {skills ? (
             <div className="relay-context-summary">
-              {tf("源目录 {0}；启用后软链到 {1}", [skills.skillsDir, skills.codexSkillsDir])}
+              {tf("源目录 {0}；新装技能软链到 {1}，旧版 codex 安装仍在 {2}", [skills.skillsDir, skills.agentsSkillsDir, skills.codexSkillsDir])}
             </div>
           ) : null}
           {repoErrors.length ? (
@@ -6492,7 +4162,7 @@ function SkillsScreen({ skills, actions }: { skills: SkillsResult | null; action
             </div>
           </div>
           {visible.length ? (
-            <div className="script-market-grid">
+            <div className="skill-list">
               {visible.map((entry) => (
                 <SkillCard actions={actions} entry={entry} key={entry.id} />
               ))}
@@ -6512,6 +4182,7 @@ function SkillCard({ entry, actions }: { entry: SkillEntry; actions: Actions }) 
   const busy = actions.skillBusyId === entry.id;
   const tags = [
     entry.bundled ? t("内置") : null,
+    entry.bundled ? null : entry.targets.includes("agents") ? t("Agents") : entry.targets.includes("codex") ? t("Codex") : entry.installed ? t("本地") : null,
     entry.installed && !entry.bundled ? (entry.enabled ? t("已启用") : t("已停用")) : null,
     entry.updateAvailable ? t("有新版本") : null,
   ].filter((tag): tag is string => tag !== null);
@@ -6538,7 +4209,8 @@ function SkillCard({ entry, actions }: { entry: SkillEntry; actions: Actions }) 
         {entry.bundled ? (
           <span className="skill-card-tag">{t("Codex 自带，随版本更新")}</span>
         ) : entry.installed ? (
-          <>
+          entry.managed ? (
+            <>
             <Button
               disabled={busy}
               onClick={() => void actions.setSkillEnabled(entry.id, !entry.enabled)}
@@ -6557,7 +4229,13 @@ function SkillCard({ entry, actions }: { entry: SkillEntry; actions: Actions }) 
               <Trash2 className="h-4 w-4" />
               {t("卸载")}
             </Button>
-          </>
+            </>
+          ) : (
+            <Button disabled={busy} onClick={() => void actions.uninstallSkill(entry.id)} size="sm" variant="ghost">
+              <Trash2 className="h-4 w-4" />
+              {t("卸载")}
+            </Button>
+          )
         ) : (
           <Button disabled={busy || !entry.repoKey} onClick={() => void actions.installSkill(entry.repoKey, entry.id)} size="sm">
             <Download className="h-4 w-4" />
@@ -6717,7 +4395,7 @@ function UserScriptsScreen({ settings, market, actions }: { settings: SettingsRe
   const scripts = inventory?.scripts ?? [];
   const marketScripts = market?.market.scripts ?? [];
   const [marketSearch, setMarketSearch] = useState("");
-  const [marketView, setMarketView] = useState<"grid" | "list">("grid");
+  const [marketView, setMarketView] = useState<"grid" | "list">("list");
   const filteredMarketScripts = useMemo(() => {
     const query = marketSearch.trim().toLocaleLowerCase();
     if (!query) return marketScripts;
@@ -7111,43 +4789,6 @@ function SessionsScreen({
   );
 }
 
-function RecommendationsScreen({ ads, actions }: { ads: AdsResult | null; actions: Actions }) {
-  const items = (ads?.ads ?? []).filter((ad) => !isExpiredAd(ad));
-  const sponsors = items.filter((ad) => ad.type === "sponsor");
-  const normal = items.filter((ad) => ad.type === "normal");
-  return (
-    <>
-      <Panel>
-        <CardHead title={t("推荐内容")} detail={t("与 Codex 内插件菜单使用同一个远端广告源")} />
-        <CardContent>
-          <div className="recommend-hero">
-            <div>
-              <strong>{ads ? tf("已加载 {0} 条推荐", [items.length]) : t("尚未加载推荐内容")}</strong>
-              <span>{t("内容来自 BigPizzaV3/Ad-List，分为赞助商推荐和普通推荐。")}</span>
-            </div>
-            <Button onClick={() => void actions.refreshAds()}>
-              <RefreshCw className="h-4 w-4" />
-              {t("刷新推荐")}
-            </Button>
-          </div>
-        </CardContent>
-      </Panel>
-      <Panel>
-        <CardHead title={t("赞助商推荐")} detail={tf("{0} 条", [sponsors.length])} />
-        <CardContent>
-          <AdGrid actions={actions} ads={sponsors} empty={t("暂无赞助商推荐。")} />
-        </CardContent>
-      </Panel>
-      <Panel>
-        <CardHead title={t("普通推荐")} detail={tf("{0} 条", [normal.length])} />
-        <CardContent>
-          <AdGrid actions={actions} ads={normal} empty={t("暂无普通推荐。")} />
-        </CardContent>
-      </Panel>
-    </>
-  );
-}
-
 function MaintenanceScreen({
   overview,
   watcher,
@@ -7371,90 +5012,6 @@ function SettingsScreen({
               placeholder={t("例如 gpt-5.4-mini")}
             />
           </Field>
-          <div className="settings-block stepwise-settings-block">
-            <div className="section-title">Stepwise</div>
-            <div className="stepwise-settings-section">{t("连接")}</div>
-            <div className="form-row">
-              <Field label="Base URL">
-                <Input
-                  value={form.codexAppStepwiseBaseUrl}
-                  onChange={(event) => onFormChange({ ...form, codexAppStepwiseBaseUrl: event.currentTarget.value })}
-                  placeholder="https://api.example.com/v1"
-                />
-              </Field>
-              <Field label="Model">
-                <Input
-                  value={form.codexAppStepwiseModel}
-                  onChange={(event) => onFormChange({ ...form, codexAppStepwiseModel: event.currentTarget.value })}
-                  placeholder={t("例如 gpt-5.4-mini")}
-                />
-              </Field>
-            </div>
-            <Field label="API Key">
-              <Input
-                type="password"
-                value={form.codexAppStepwiseApiKey}
-                onChange={(event) => onFormChange({ ...form, codexAppStepwiseApiKey: event.currentTarget.value })}
-              />
-            </Field>
-            <details className="stepwise-advanced">
-              <summary>{t("高级参数")}</summary>
-              <div className="form-row">
-                <Field label={t("API Key 环境变量")}>
-                  <Input
-                    value={form.codexAppStepwiseApiKeyEnv}
-                    onChange={(event) => onFormChange({ ...form, codexAppStepwiseApiKeyEnv: event.currentTarget.value })}
-                  />
-                </Field>
-                <Field label={t("最多建议数")}>
-                  <Input
-                    max={6}
-                    min={0}
-                    type="number"
-                    value={form.codexAppStepwiseMaxItems}
-                    onChange={(event) =>
-                      onFormChange({ ...form, codexAppStepwiseMaxItems: clampNumber(Number(event.currentTarget.value), 0, 6) })
-                    }
-                  />
-                </Field>
-              </div>
-              <div className="form-row">
-                <Field label={t("超时毫秒")}>
-                  <Input
-                    min={1000}
-                    type="number"
-                    value={form.codexAppStepwiseTimeoutMs}
-                    onChange={(event) =>
-                      onFormChange({ ...form, codexAppStepwiseTimeoutMs: clampNumber(Number(event.currentTarget.value), 1000, 60000) })
-                    }
-                  />
-                </Field>
-                <Field label={t("最大输入字符")}>
-                  <Input
-                    min={1000}
-                    type="number"
-                    value={form.codexAppStepwiseMaxInputChars}
-                    onChange={(event) =>
-                      onFormChange({ ...form, codexAppStepwiseMaxInputChars: clampNumber(Number(event.currentTarget.value), 1000, 24000) })
-                    }
-                  />
-                </Field>
-              </div>
-              <Field label={t("最大输出 tokens")}>
-                <Input
-                  min={100}
-                  type="number"
-                  value={form.codexAppStepwiseMaxOutputTokens}
-                  onChange={(event) =>
-                    onFormChange({ ...form, codexAppStepwiseMaxOutputTokens: clampNumber(Number(event.currentTarget.value), 100, 4000) })
-                  }
-                />
-              </Field>
-            </details>
-            <div className="toolbar stepwise-settings-actions">
-              <Button variant="secondary" onClick={() => void actions.testStepwiseSettings(form)}>{t("测试连接")}</Button>
-            </div>
-          </div>
           <div className="settings-block">
             <label className="check-row">
               <input
@@ -7793,13 +5350,27 @@ function MarketScriptCard({ script, actions, view = "grid" }: { script: ScriptMa
   const githubSupportLabel = isGitHubHomepage ? tf("在 GitHub 上支持作者：{0}", [script.name]) : undefined;
   return (
     <div className="script-market-card" data-view={view}>
-      <div className="script-market-title">
-        <div>
-          <strong>{script.name}</strong>
-          <span>{script.author || t("未知作者")}</span>
+      {view === "grid" ? (
+        <div className="script-market-title">
+          <div>
+            <strong>{script.name}</strong>
+            <span>{script.author || t("未知作者")}</span>
+          </div>
+          <UiBadge variant={script.updateAvailable ? "default" : script.installed ? "secondary" : "outline"}>{status}</UiBadge>
         </div>
-        <UiBadge variant={script.updateAvailable ? "default" : script.installed ? "secondary" : "outline"}>{status}</UiBadge>
-      </div>
+      ) : (
+        <>
+          <div className="script-market-title">
+            <div>
+              <strong>{script.name}</strong>
+              <span>{script.author || t("未知作者")}</span>
+            </div>
+          </div>
+          <div className="script-market-status">
+            <UiBadge variant={script.updateAvailable ? "default" : script.installed ? "secondary" : "outline"}>{status}</UiBadge>
+          </div>
+        </>
+      )}
       <p className="script-market-description">{script.description || t("暂无描述。")}</p>
       <div className="script-market-tags">
         <span className="script-market-tag">v{script.version}</span>
@@ -9991,38 +7562,6 @@ function GuideList({ items }: { items: string[] }) {
   );
 }
 
-function DreamSkinUnsavedDialog({
-  onSave,
-  onDiscard,
-  onCancel,
-}: {
-  onSave: () => void;
-  onDiscard: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal-card">
-        <div className="modal-head">
-          <div>
-            <h2>{t("主题有未保存修改")}</h2>
-            <p className="modal-message">{t("保存修改后继续，或放弃修改。")}</p>
-          </div>
-          <button className="toast-close" onClick={onCancel} type="button">×</button>
-        </div>
-        <Toolbar>
-          <Button onClick={onSave}>
-            <Save className="h-4 w-4" />
-            {t("保存并继续")}
-          </Button>
-          <Button onClick={onDiscard} variant="secondary">{t("放弃修改")}</Button>
-          <Button onClick={onCancel} variant="outline">{t("取消")}</Button>
-        </Toolbar>
-      </div>
-    </div>
-  );
-}
-
 function NoticeDialog({
   notice,
   onClose,
@@ -10170,7 +7709,7 @@ function PendingProviderImportDialog({
         <div className="modal-head">
           <div>
             <h2>{t("导入 Codex++ 供应商")}</h2>
-            <p>{t("检测到来自网页的供应商配置导入请求，确认后会写入本机 Codex++ 管理工具。")}</p>
+            <p>{t("检测到来自网页的供应商配置导入请求，确认后会写入本机 Codex++。")}</p>
           </div>
           <button className="toast-close" onClick={onDismiss} type="button">×</button>
         </div>
@@ -10188,44 +7727,6 @@ function PendingProviderImportDialog({
           <Button onClick={onConfirm}>
             <Download className="h-4 w-4" />
             {t("确认导入")}
-          </Button>
-          <Button onClick={onDismiss} variant="secondary">{t("取消")}</Button>
-        </Toolbar>
-      </div>
-    </div>
-  );
-}
-
-function DreamSkinCommunityLinkDialog({
-  versionId,
-  onConfirm,
-  onDismiss,
-}: {
-  versionId: string;
-  onConfirm: () => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal-card provider-import-modal">
-        <div className="modal-head">
-          <div>
-            <h2>{t("从 DreamSkin.cc 安装主题")}</h2>
-            <p>{t("检测到网页一键换肤请求。确认后会从固定社区 API 下载，并在本机重新校验大小、SHA-256、ZIP 清单与 Safe CSS。")}</p>
-          </div>
-          <button className="toast-close" onClick={onDismiss} type="button">×</button>
-        </div>
-        <div className="metric-list">
-          <Metric label={t("主题版本 ID")} value={versionId} />
-          <Metric label={t("来源")} value="api.dreamskin.cc" />
-        </div>
-        <div className="hint-line" role="note">
-          {t("链接不能携带任意下载地址、文件路径或命令；安装后主题会进入“我的主题”，不会自动重启 Codex。")}
-        </div>
-        <Toolbar>
-          <Button onClick={onConfirm}>
-            <Download className="h-4 w-4" />
-            {t("下载并安装")}
           </Button>
           <Button onClick={onDismiss} variant="secondary">{t("取消")}</Button>
         </Toolbar>
@@ -10420,42 +7921,140 @@ function ScriptRow({ script, actions }: { script: NonNullable<UserScriptInventor
   );
 }
 
-function AdGrid({ ads, empty, actions }: { ads: AdItem[]; empty: string; actions: Actions }) {
-  if (!ads.length) return <div className="empty">{empty}</div>;
+type PromptTemplate = PromptCatalogItem;
+type LegacyPromptTemplate = { id: string; title: string; category: string; content: string; enabled: boolean };
+
+function PromptsScreen() {
+  const [templates, setTemplates] = useState<LegacyPromptTemplate[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("codex-plus-prompts") || "[]") as LegacyPromptTemplate[];
+    } catch {
+      return [];
+    }
+  });
+  const [category, setCategory] = useState("全部");
+  const [draft, setDraft] = useState({ title: "", category: "开发", content: "" });
+  const categories = ["全部", "开发", "写作", "分析"];
+  const visible = templates.filter((item) => category === "全部" || item.category === category);
+  const persist = (next: LegacyPromptTemplate[]) => {
+    setTemplates(next);
+    localStorage.setItem("codex-plus-prompts", JSON.stringify(next));
+  };
+  const add = () => {
+    if (!draft.title.trim() || !draft.content.trim()) return;
+    persist([...templates, { id: crypto.randomUUID(), ...draft, enabled: false }]);
+    setDraft({ title: "", category: "开发", content: "" });
+  };
   return (
-    <div className="ad-grid">
-      {ads.map((ad) => (
-        <button className="ad-card" key={ad.id || `${ad.type}-${ad.title}`} onClick={() => void actions.openExternalUrl(ad.url)} type="button">
-          {ad.image ? <img alt="" className="ad-image" src={ad.image} /> : null}
-          <div className="ad-content">
-            <strong>{formatAdTitle(ad.title)}</strong>
-            <p>{ad.description}</p>
+    <>
+      <Panel>
+        <CardHead title={t("指令提示词")} detail={t("本地模板清单，启用后可快速复制到当前任务。")} />
+        <CardContent>
+          <Toolbar>
+            <Button onClick={() => document.getElementById("prompt-title")?.focus()}><Plus className="h-4 w-4" />{t("添加提示词")}</Button>
+            <span className="muted">{tf("共 {0} 个模板", [templates.length])}</span>
+          </Toolbar>
+          <div className="prompt-category-tabs">
+            {categories.map((item) => <Button key={item} size="sm" variant={category === item ? "secondary" : "ghost"} onClick={() => setCategory(item)}>{t(item)}</Button>)}
           </div>
-          {ad.highlights?.length ? (
-            <div className="ad-tags">
-              {ad.highlights.map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-          ) : null}
-          <span className="ad-link">
-            {t("打开")}
-            <ExternalLink className="h-4 w-4" />
-          </span>
-        </button>
-      ))}
-    </div>
+          <div className="prompt-list">
+            {visible.map((item) => (
+              <div className="prompt-row" key={item.id}>
+                <div className="prompt-row-main"><strong>{item.title}</strong><span>{item.category}</span></div>
+                <p>{item.content}</p>
+                <Button size="sm" variant={item.enabled ? "secondary" : "outline"} onClick={() => persist(templates.map((entry) => entry.id === item.id ? { ...entry, enabled: !entry.enabled } : entry))}>{item.enabled ? t("已启用") : t("启用")}</Button>
+                <Button size="icon" variant="ghost" title={t("删除")} onClick={() => persist(templates.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            ))}
+            {!visible.length ? <div className="empty">{t("还没有提示词模板。")}</div> : null}
+          </div>
+        </CardContent>
+      </Panel>
+      <Panel>
+        <CardHead title={t("新建模板")} detail={t("模板仅保存在本机浏览器存储中。")} />
+        <CardContent>
+          <div className="prompt-editor">
+            <Input id="prompt-title" placeholder={t("模板名称")} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })} />
+            <select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.currentTarget.value })}>{categories.slice(1).map((item) => <option key={item}>{t(item)}</option>)}</select>
+            <Textarea placeholder={t("输入提示词内容")} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.currentTarget.value })} />
+            <Button onClick={add}><Save className="h-4 w-4" />{t("保存模板")}</Button>
+          </div>
+        </CardContent>
+      </Panel>
+    </>
   );
 }
 
-function formatAdTitle(title: string) {
-  return title.split(/[｜|]/, 1)[0].trim() || title;
+function CodexXPromptsScreen() {
+  const [templates, setTemplates] = useState<PromptTemplate[]>(() => {
+    try {
+      const local = JSON.parse(localStorage.getItem("codex-plus-prompts") || "[]") as Partial<PromptTemplate>[];
+      return local.map((item) => ({
+        id: item.id || crypto.randomUUID(), title: item.title || "Untitled prompt", category: item.category || "自定义",
+        content: item.content || "", enabled: Boolean(item.enabled), source: item.source === "codex-x" ? "codex-x" : "local",
+        filename: item.filename || `${item.title || "prompt"}.md`, description: item.description || item.content?.slice(0, 140) || "",
+      }));
+    } catch { return []; }
+  });
+  const [category, setCategory] = useState("全部");
+  const [draft, setDraft] = useState({ title: "", category: "软件开发", content: "" });
+  const [injectionMode, setInjectionMode] = useState<"append" | "replace">("append");
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [showEditor, setShowEditor] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
+  const categories = ["全部", "破甲 / 逆向", "软件开发", "写作辅助", "自定义"];
+  const visible = templates.filter((item) => category === "全部" || item.category === category);
+  const persist = (next: PromptTemplate[]) => { setTemplates(next); localStorage.setItem("codex-plus-prompts", JSON.stringify(next)); };
+  const mergeCatalog = (remote: PromptTemplate[]) => {
+    const custom = templates.filter((item) => item.source !== "codex-x");
+    const enabledById = new Map(templates.map((item) => [item.id, item.enabled]));
+    persist([...remote.map((item) => ({ ...item, enabled: enabledById.get(item.id) ?? false })), ...custom]);
+  };
+  const sync = async () => {
+    setSyncing(true); setSyncMessage("");
+    try { const result = await syncCodexXPromptCatalog(); mergeCatalog(result.items); setSyncMessage(result.fromCache ? t("已使用上次同步缓存") : t("已同步 Codex-X 上游模板")); }
+    catch (error) { setSyncMessage(error instanceof Error ? error.message : t("模板同步失败")); }
+    finally { setSyncing(false); }
+  };
+  useEffect(() => { const cached = readPromptCatalogCache(); if (cached.length && !templates.some((item) => item.source === "codex-x")) mergeCatalog(cached); }, []);
+  const add = () => {
+    if (!draft.title.trim() || !draft.content.trim()) return;
+    const filename = `${draft.title.trim().replace(/\s+/g, "-").toLowerCase()}.md`;
+    persist([...templates, { id: `local:${crypto.randomUUID()}`, ...draft, enabled: false, source: "local", filename, description: draft.content.trim().slice(0, 140) }]);
+    setDraft({ title: "", category: "软件开发", content: "" }); setShowEditor(false);
+  };
+  const importMarkdown = (file?: File) => {
+    if (!file) return;
+    void file.text().then((content) => {
+      const title = file.name.replace(/\.md$/i, "").replace(/[-_]+/g, " ");
+      persist([...templates, { id: `local:${crypto.randomUUID()}`, title, category: "自定义", content, enabled: false, source: "local", filename: file.name, description: content.split(/\r?\n/).find((line) => line.trim())?.trim() || t("自定义指令提示词") }]);
+      setCategory("自定义");
+    });
+  };
+  return <section className="codex-x-prompts-page">
+    <header className="codex-x-prompts-header"><div><div className="codex-x-eyebrow"><Sparkles className="h-4 w-4" />PROMPT INJECTION</div><h2>{t("一键管理指令提示词")}</h2><p>{t("选择启用方式，再管理内置、在线或自定义的 Markdown 提示词。")}</p></div><div className="codex-x-header-actions"><input ref={importRef} type="file" accept=".md,text/markdown,text/plain" hidden onChange={(event) => importMarkdown(event.currentTarget.files?.[0])} /><Button variant="outline" onClick={() => void sync()} disabled={syncing}><RefreshCw className={`h-4 w-4 ${syncing ? "spin" : ""}`} />{syncing ? t("同步中...") : t("同步 GitHub 模板")}</Button><Button variant="outline" onClick={() => importRef.current?.click()}><Upload className="h-4 w-4" />{t("导入 md")}</Button><Button onClick={() => setShowEditor(true)}><Plus className="h-4 w-4" />{t("添加提示词")}</Button></div></header>
+    {syncMessage ? <div className="codex-x-sync-message">{syncMessage}</div> : null}
+    <section className="codex-x-mode-panel"><div><span className="codex-x-label">{t("当前状态")}</span><div className="codex-x-active-title"><span className="codex-x-state-dot" /><strong>{templates.some((item) => item.enabled) ? templates.find((item) => item.enabled)?.title : t("未启用提示词")}</strong></div><p>{templates.some((item) => item.enabled) ? t("当前模板正在生效") : t("先选择启用方式，再打开下方任一模板。")}</p></div><div className="codex-x-mode-choice"><div><strong>{t("启用方式")}</strong><span title={t("追加会保留原提示词，替换会使用当前模板")}><CircleHelp className="h-4 w-4" /></span><p>{t("点击模板开关时，使用这里选择的方式。")}</p></div><div className="codex-x-mode-buttons"><button className={injectionMode === "append" ? "active" : ""} onClick={() => setInjectionMode("append")}><CirclePlus className="h-4 w-4" />{t("保留原提示词")}</button><button className={injectionMode === "replace" ? "active" : ""} onClick={() => setInjectionMode("replace")}><ArrowLeftRight className="h-4 w-4" />{t("替换原提示词")}</button></div></div></section>
+    <div className="codex-x-category-toolbar"><div className="codex-x-category-tabs">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><button className="codex-x-category-manage" onClick={() => setCategory("自定义")}><Settings2 className="h-4 w-4" />{t("分类管理")}</button></div>
+    <div className="codex-x-prompt-grid">{visible.map((item) => <article className="codex-x-prompt-card" key={item.id}><div className="codex-x-card-top"><div className="codex-x-file-icon"><FileText className="h-5 w-5" /></div><strong title={item.title}>{item.title}</strong><button className={`codex-x-toggle ${item.enabled ? "on" : ""}`} onClick={() => persist(templates.map((entry) => entry.id === item.id ? { ...entry, enabled: !entry.enabled } : entry))} aria-label={item.enabled ? t("关闭") : t("启用")}><span /></button></div><p title={item.description}>{item.description}</p><div className="codex-x-card-footer"><span>{item.source === "codex-x" ? "Codex-X" : t("自定义")}</span><button title={t("编辑")} onClick={() => { setDraft({ title: item.title, category: item.category, content: item.content }); setShowEditor(true); }}><PencilLine className="h-4 w-4" /></button>{item.source === "local" ? <button title={t("删除")} onClick={() => persist(templates.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></button> : null}</div></article>)}{!visible.length ? <div className="codex-x-empty"><FileText className="h-5 w-5" />{t("该分类下暂无提示词")}</div> : null}</div>
+    {showEditor ? <section className="codex-x-editor-panel"><div className="codex-x-editor-head"><div><PencilLine className="h-4 w-4" /><strong>{t("添加提示词")}</strong></div><button onClick={() => setShowEditor(false)} aria-label={t("关闭")}>×</button></div><div className="codex-x-editor-grid"><Input id="prompt-title" placeholder={t("模板名称")} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })} /><select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.currentTarget.value })}>{categories.slice(1).map((item) => <option key={item}>{item}</option>)}</select><Textarea placeholder={t("输入提示词内容")} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.currentTarget.value })} /><Button onClick={add}><Save className="h-4 w-4" />{t("保存模板")}</Button></div></section> : null}
+  </section>;
 }
 
-function isExpiredAd(ad: AdItem) {
-  if (!ad.expires_at) return false;
-  const expiresAt = Date.parse(ad.expires_at);
-  return Number.isFinite(expiresAt) && expiresAt < Date.now();
+function LiveTomlScreen({ liveConfig, actions }: { liveConfig: LiveConfigResult | null; actions: Actions }) {
+  const [text, setText] = useState(liveConfig?.config.text ?? "");
+  const [preview, setPreview] = useState<LiveConfigPreviewResult | null>(null);
+  useEffect(() => setText(liveConfig?.config.text ?? ""), [liveConfig?.config.text]);
+  const highlightedLines = tokenizeCode(text, "toml");
+  return (
+    <section className="codex-x-toml-page">
+      <header className="codex-x-toml-header"><div><div className="codex-x-eyebrow"><FileCode2 className="h-4 w-4" />LIVE CONFIG</div><h2>{t("当前 Live TOML 配置")}</h2><p>{liveConfig?.config.path || "~/.codex/config.toml"}</p></div><div className="codex-x-toml-actions"><span className={liveConfig?.config.parseStatus === "valid" ? "status-good" : "status-warning"}>{liveConfig?.config.parseStatus === "valid" ? t("已读取") : t("待检查")}</span><Button size="sm" variant="outline" onClick={() => void actions.refreshLiveConfig()}><RefreshCw className="h-4 w-4" />{t("重新读取")}</Button><Button size="sm" onClick={async () => setPreview(await actions.previewLiveConfig(text))}><TestTube className="h-4 w-4" />{t("校验预览")}</Button></div></header>
+      <div className="codex-x-code-editor"><div className="codex-x-code-gutter">{highlightedLines.map((_, index) => <span key={index}>{index + 1}</span>)}</div><pre aria-hidden="true">{highlightedLines.map((line, index) => <code key={index}>{line.map((token, tokenIndex) => <span className={`toml-token-${token.kind}`} key={tokenIndex}>{token.text}</span>)}{index < highlightedLines.length - 1 ? "\n" : ""}</code>)}</pre><textarea value={text} onChange={(event) => setText(event.currentTarget.value)} spellCheck={false} aria-label={t("TOML 配置编辑器")} /></div>
+      {liveConfig?.config.sha256 ? <div className="codex-x-toml-meta">SHA-256 {liveConfig.config.sha256}</div> : null}
+      {preview ? <div className={preview.preview.parseStatus === "valid" ? "live-preview-ok" : "live-preview-error"}>{preview.preview.error || t("配置解析通过。")}</div> : null}
+    </section>
+  );
 }
 
 function routeTitle(route: Route) {
@@ -10466,17 +8065,15 @@ function routeSubtitle(route: Route) {
   const subtitles: Record<Route, string> = {
     overview: t("检查问题、启动与快速修复"),
     relay: t("管理 API 供应商、协议、Key 与配置文件"),
-    grok: t("管理 Grok CLI 的模型与 API 端点"),
     relayEnvironment: t("排查可能干扰中转站配置的本机环境"),
     sessions: t("查看、删除和修复 Codex 本地会话"),
     context: t("独立管理 MCP 服务器与插件"),
     skills: t("从 GitHub 仓库安装 Skill 到 Codex"),
+    prompts: t("管理可复用的指令提示词模板"),
+    toml: t("查看当前 Codex 正在使用的 live config.toml"),
     weixin: t("通过个人微信连接本机 Codex 会话"),
     enhance: t("会话删除、导出和脚本能力"),
-    dreamSkin: t("Codex-Dream-Skin 风格主题和换图"),
-    zedRemote: t("管理 Codex SSH 项目并加入 Zed workspace"),
     userScripts: t("内置和用户自定义脚本清单"),
-    recommendations: t("赞助商推荐与普通推荐"),
     maintenance: t("入口安装、修复、Watcher 与手动启动"),
     about: t("版本信息、项目链接、GitHub Release 更新、日志与诊断"),
     settings: t("主题和启动参数"),
@@ -11135,13 +8732,6 @@ function normalizeSettings(settings: BackendSettings): BackendSettings {
     relayProfilesEnabled: settings.relayProfilesEnabled !== false,
     codexAppImageOverlayOpacity: clampNumber(settings.codexAppImageOverlayOpacity || 35, 1, 100),
     codexAppImageOverlayFitMode: normalizeImageOverlayFitMode(settings.codexAppImageOverlayFitMode),
-    codexAppDreamSkinPaused: settings.codexAppDreamSkinPaused === true,
-    codexAppDreamSkinThemeConfig: normalizeDreamSkinTheme(settings.codexAppDreamSkinThemeConfig),
-    codexAppDreamSkinImagePath: (settings.codexAppDreamSkinImagePath || "").trim(),
-    codexAppStepwiseMaxItems: clampNumber(settings.codexAppStepwiseMaxItems ?? 6, 0, 6),
-    codexAppStepwiseMaxInputChars: clampNumber(settings.codexAppStepwiseMaxInputChars || 6000, 1000, 24000),
-    codexAppStepwiseMaxOutputTokens: clampNumber(settings.codexAppStepwiseMaxOutputTokens || 500, 100, 4000),
-    codexAppStepwiseTimeoutMs: clampNumber(settings.codexAppStepwiseTimeoutMs || 8000, 1000, 60000),
     relayCommonConfigContents,
     relayContextConfigContents,
     relayProfiles: profiles,
@@ -12298,28 +9888,6 @@ function numberOrDefault(value: string, fallback: number) {
 
 function splitLogLines(text: string) {
   return text.trimEnd().split(/\r?\n/).filter((line, index, lines) => line.length > 0 || index < lines.length - 1);
-}
-
-function zedStrategyLabel(strategy: ZedOpenStrategy) {
-  if (strategy === "reuseWindow") return t("复用窗口");
-  if (strategy === "newWindow") return t("新窗口");
-  if (strategy === "default") return t("Zed 默认行为");
-  return t("加入当前工作区");
-}
-
-function zedRemoteHostLabel(project: ZedRemoteProject) {
-  const user = project.ssh.user ? `${project.ssh.user}@` : "";
-  const port = project.ssh.port ? `:${project.ssh.port}` : "";
-  return `${user}${project.ssh.host}${port}`;
-}
-
-function zedRemoteSourceLabel(source: string) {
-  if (source === "currentThread") return t("当前会话");
-  if (source === "codexRemoteProject") return "Codex remote project";
-  if (source === "threadWorkspaceHint") return "Thread workspace hint";
-  if (source === "sqliteThreadCwd") return "SQLite cwd";
-  if (source === "recent") return t("最近打开");
-  return source || t("未知来源");
 }
 
 function formatTime(value: number) {

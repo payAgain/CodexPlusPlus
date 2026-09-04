@@ -3341,6 +3341,68 @@ base_url = "https://relay.example/v1"
 }
 
 #[test]
+fn pure_api_apply_strips_chatgpt_login_fields_from_auth_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "kuaipao".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model_provider = "custom"
+model = "gpt-5.6-terra"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://kuaipao.ai/v1"
+"#
+        .to_string(),
+        auth_contents:
+            r#"{"OPENAI_API_KEY":"sk-test","auth_mode":"chatgpt","tokens":{"access_token":"stale"},"last_refresh":"2026-01-01T00:00:00Z"}"#
+                .to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_to_home_with_switch_rules(temp.path(), &profile, "").unwrap();
+
+    let auth: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(temp.path().join("auth.json")).unwrap())
+            .unwrap();
+    assert_eq!(auth["OPENAI_API_KEY"], "sk-test");
+    assert_eq!(auth["last_refresh"], "2026-01-01T00:00:00Z");
+    assert!(auth.get("auth_mode").is_none());
+    assert!(auth.get("tokens").is_none());
+}
+
+#[test]
+fn apply_relay_profile_common_config_defaults_to_yolo_and_multi_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "relay-a".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model_provider = "custom"
+model = "glm-5.3"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-test"}"#.to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_to_home_with_switch_rules(temp.path(), &profile, "").unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    let parsed = config.parse::<toml_edit::DocumentMut>().unwrap();
+    assert_eq!(parsed["features"]["multi_agent_v2"].as_bool(), Some(true));
+    assert_eq!(parsed["sandbox_mode"].as_str(), Some("danger-full-access"));
+    assert_eq!(parsed["approval_policy"].as_str(), Some("never"));
+}
+
+#[test]
 fn apply_relay_profile_to_home_with_switch_rules_repairs_incomplete_provider_config() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(

@@ -1,4 +1,3 @@
-pub mod ads;
 pub mod app_paths;
 pub mod assets;
 pub mod bridge;
@@ -10,17 +9,11 @@ pub mod codex_local_storage;
 pub mod codex_sqlite;
 pub mod connect;
 pub mod diagnostic_log;
-pub mod dream_skin;
-pub mod dream_skin_community;
-pub mod dream_skin_library;
-pub mod dream_skin_market;
-pub mod dream_skin_package;
-pub mod dream_skin_runtime;
 pub mod env_conflicts;
-pub mod grok_config;
 pub mod http_client;
 pub mod install;
 pub mod launcher;
+pub mod live_config;
 pub mod mcp_config;
 pub mod model_catalog;
 pub mod model_suffix;
@@ -39,22 +32,19 @@ pub mod relay_switch;
 pub mod remote_control_recovery;
 pub mod routes;
 pub mod script_market;
-pub mod share;
 pub mod session_share;
 pub mod settings;
+pub mod share;
 pub mod skills;
 pub mod status;
-pub mod stepwise;
 pub mod sub2api;
 pub mod update;
-pub mod upstream_worktree;
 pub mod user_scripts;
 pub mod version;
 pub mod vision;
 pub mod watcher;
 #[cfg(windows)]
 mod windows_integration;
-pub mod zed_remote;
 
 #[cfg(windows)]
 pub fn windows_create_no_window() -> u32 {

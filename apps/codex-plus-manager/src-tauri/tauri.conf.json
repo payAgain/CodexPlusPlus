@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Codex++ Manager",
+  "productName": "Codex++",
   "version": "1.2.56",
   "identifier": "com.bigpizzav3.codexplusplus.manager",
   "build": {
@@ -14,7 +14,7 @@
       {
         "create": false,
         "label": "main",
-        "title": "Codex++ 管理工具",
+        "title": "Codex++",
         "width": 1180,
         "height": 820,
         "minWidth": 960,
@@ -25,9 +25,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "$HOME/.codex-session-delete/dream-skin/**"
-        ]
+        "scope": []
       }
     }
   },

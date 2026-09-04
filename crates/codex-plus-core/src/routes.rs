@@ -89,21 +89,9 @@ pub trait BridgeRuntimeService: Send + Sync {
     }
     async fn backend_status(&self) -> anyhow::Result<Value>;
     async fn codex_model_catalog(&self) -> anyhow::Result<Value>;
-    async fn ads(&self) -> anyhow::Result<Value>;
     async fn create_share(&self, payload: Value) -> anyhow::Result<Value> {
         crate::share::create_share(payload).await
     }
-    async fn zed_remote_status(&self) -> anyhow::Result<Value>;
-    async fn resolve_zed_remote_host(&self, payload: Value) -> anyhow::Result<Value>;
-    async fn fallback_zed_remote_request(&self, payload: Value) -> anyhow::Result<Value>;
-    async fn open_zed_remote(&self, payload: Value) -> anyhow::Result<Value>;
-    async fn list_zed_remote_projects(&self, payload: Value) -> anyhow::Result<Value>;
-    async fn remember_zed_remote_project(&self, payload: Value) -> anyhow::Result<Value>;
-    async fn forget_zed_remote_project(&self, payload: Value) -> anyhow::Result<Value>;
-    async fn upstream_worktree_status(&self) -> anyhow::Result<Value>;
-    async fn upstream_worktree_defaults(&self, payload: Value) -> anyhow::Result<Value>;
-    async fn upstream_worktree_prepare(&self, payload: Value) -> anyhow::Result<Value>;
-    async fn upstream_worktree_create(&self, payload: Value) -> anyhow::Result<Value>;
 }
 
 #[async_trait]
@@ -191,42 +179,7 @@ pub async fn handle_bridge_request(
         "/codex-model-catalog" | "/codex-config-model" => ctx.runtime.codex_model_catalog().await,
         "/diagnostics/log" => diagnostic_log_value(payload.clone()),
         "/llm-proxy" => llm_proxy_value(payload.clone()).await,
-        "/ads" => ctx.runtime.ads().await,
         "/share/create" => ctx.runtime.create_share(payload.clone()).await,
-        "/zed-remote/status" => ctx.runtime.zed_remote_status().await,
-        "/zed-remote/resolve-host" => ctx.runtime.resolve_zed_remote_host(payload.clone()).await,
-        "/zed-remote/fallback-request" => {
-            ctx.runtime
-                .fallback_zed_remote_request(payload.clone())
-                .await
-        }
-        "/zed-remote/open" => ctx.runtime.open_zed_remote(payload.clone()).await,
-        "/zed-remote/projects" => ctx.runtime.list_zed_remote_projects(payload.clone()).await,
-        "/zed-remote/remember-project" => {
-            ctx.runtime
-                .remember_zed_remote_project(payload.clone())
-                .await
-        }
-        "/zed-remote/forget-project" => {
-            ctx.runtime.forget_zed_remote_project(payload.clone()).await
-        }
-        "/upstream-worktree/status" => ctx.runtime.upstream_worktree_status().await,
-        "/upstream-worktree/defaults" => {
-            ctx.runtime
-                .upstream_worktree_defaults(payload.clone())
-                .await
-        }
-        "/upstream-worktree/prepare" => {
-            ctx.runtime.upstream_worktree_prepare(payload.clone()).await
-        }
-        "/upstream-worktree/create" => ctx.runtime.upstream_worktree_create(payload.clone()).await,
-        "/stepwise/settings" => stepwise_settings_value(ctx.settings.get_settings().await),
-        "/stepwise/generate" => {
-            stepwise_generate_value(ctx.settings.get_settings().await, payload.clone()).await
-        }
-        "/stepwise/test" => {
-            stepwise_test_value(ctx.settings.get_settings().await, payload.clone()).await
-        }
         "/delete" => result_value(ctx.data.delete(session_from_payload(&payload)).await),
         "/undo" => {
             let undo_token = payload
@@ -263,10 +216,11 @@ pub async fn handle_bridge_request(
                 .to_string();
             ctx.data.recover_remote_control_session(thread_id).await
         }
-        "/session/export" => ctx
-            .data
-            .export_session_file(session_from_payload(&payload))
-            .await,
+        "/session/export" => {
+            ctx.data
+                .export_session_file(session_from_payload(&payload))
+                .await
+        }
         "/session/import" => ctx.data.import_session_file(payload.clone()).await,
         _ => {
             let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -494,60 +448,6 @@ impl BridgeRuntimeService for CoreRuntimeService {
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {
         Ok(crate::model_catalog::read_codex_model_catalog().await)
     }
-
-    async fn ads(&self) -> anyhow::Result<Value> {
-        crate::ads::fetch_ad_list().await
-    }
-
-    async fn zed_remote_status(&self) -> anyhow::Result<Value> {
-        Ok(crate::zed_remote::zed_remote_status())
-    }
-
-    async fn resolve_zed_remote_host(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::zed_remote::resolve_ssh_target_response(&payload))
-    }
-
-    async fn fallback_zed_remote_request(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::zed_remote::fallback_open_request_response(&payload))
-    }
-
-    async fn open_zed_remote(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::zed_remote::open_zed_remote(&payload))
-    }
-
-    async fn list_zed_remote_projects(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::zed_remote::list_zed_remote_projects_response(
-            &payload,
-        ))
-    }
-
-    async fn remember_zed_remote_project(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::zed_remote::remember_zed_remote_project_response(
-            &payload,
-        ))
-    }
-
-    async fn forget_zed_remote_project(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::zed_remote::forget_zed_remote_project_response(
-            &payload,
-        ))
-    }
-
-    async fn upstream_worktree_status(&self) -> anyhow::Result<Value> {
-        Ok(crate::upstream_worktree::status_response())
-    }
-
-    async fn upstream_worktree_defaults(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::upstream_worktree::defaults_response(&payload))
-    }
-
-    async fn upstream_worktree_prepare(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::upstream_worktree::prepare_response(&payload))
-    }
-
-    async fn upstream_worktree_create(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(crate::upstream_worktree::create_response(&payload))
-    }
 }
 
 struct UnavailableDataService;
@@ -612,7 +512,6 @@ fn settings_payload_value(
     );
     let mut value = serde_json::to_value(settings)?;
     if let Some(object) = value.as_object_mut() {
-        object.remove("codexAppStepwiseApiKey");
         object.insert(
             "activeRelaySessionProvider".to_string(),
             Value::String(active_relay_session_provider.as_str().to_string()),
@@ -657,33 +556,6 @@ where
     T: serde::Serialize,
 {
     Ok(serde_json::to_value(result?)?)
-}
-
-fn stepwise_settings_value(result: anyhow::Result<BackendSettings>) -> anyhow::Result<Value> {
-    let settings = result?;
-    Ok(json!({
-        "status": "ok",
-        "settings": crate::stepwise::public_settings(&settings),
-    }))
-}
-
-async fn stepwise_generate_value(
-    result: anyhow::Result<BackendSettings>,
-    payload: Value,
-) -> anyhow::Result<Value> {
-    let settings = result?;
-    let request = payload.get("request").cloned().unwrap_or(payload);
-    let request =
-        serde_json::from_value::<crate::stepwise::StepwiseRequest>(request).unwrap_or_default();
-    crate::stepwise::generate(request, &settings).await
-}
-
-async fn stepwise_test_value(
-    result: anyhow::Result<BackendSettings>,
-    payload: Value,
-) -> anyhow::Result<Value> {
-    let settings = crate::stepwise::settings_with_payload(result?, &payload);
-    crate::stepwise::test_connection(&settings).await
 }
 
 async fn llm_proxy_value(payload: Value) -> anyhow::Result<Value> {
