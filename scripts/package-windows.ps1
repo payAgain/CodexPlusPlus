@@ -43,8 +43,26 @@ if (-not $SkipBuild) {
 
 $Stage = Join-Path $Root "dist/windows/app"
 New-Item -ItemType Directory -Force $Stage | Out-Null
-Copy-Item -Force (Join-Path $Root "target/release/codex-plus-plus.exe") $Stage
-Copy-Item -Force (Join-Path $Root "target/release/codex-plus-plus-manager.exe") $Stage
+$RequiredBinaries = @(
+    (Join-Path $Root "target/release/codex-plus-plus.exe"),
+    (Join-Path $Root "target/release/codex-plus-plus-manager.exe")
+)
+foreach ($binary in $RequiredBinaries) {
+    if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+        throw "Required build output is missing: $binary. Run without -SkipBuild or build the full workspace first."
+    }
+    Copy-Item -Force -LiteralPath $binary -Destination $Stage
+}
+
+$StagedBinaries = @(
+    (Join-Path $Stage "codex-plus-plus.exe"),
+    (Join-Path $Stage "codex-plus-plus-manager.exe")
+)
+foreach ($binary in $StagedBinaries) {
+    if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+        throw "Packaging preflight failed; staged binary is missing: $binary"
+    }
+}
 
 $Makensis = @(Get-Command makensis -ErrorAction SilentlyContinue).Source
 if (-not $Makensis) {
@@ -71,4 +89,9 @@ if (-not (Test-Path $Package)) {
     throw "Setup generation failed: $Package"
 }
 
+if ((Get-Item -LiteralPath $Package).Length -le 1MB) {
+    throw "Setup validation failed; generated installer is unexpectedly small: $Package"
+}
+
 Write-Host "Created: $Package"
+Write-Host "Packaged binaries: codex-plus-plus.exe, codex-plus-plus-manager.exe"

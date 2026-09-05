@@ -1,0 +1,3 @@
+{$CONFIG_SYNC_DOMAIN} {
+  reverse_proxy config-sync:8080
+}

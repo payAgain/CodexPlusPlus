@@ -81,7 +81,28 @@ git cherry-pick -x <upstream-commit>
 
 ## 安装包
 
-本 fork 不发布独立安装包。需要现成安装包时，可用 `scripts/package-windows.ps1` 本地打包 Windows 安装器，或使用[上游 Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases)。
+Windows 安装包必须使用仓库根目录的 `scripts/package-windows.ps1` 生成，不要直接运行 Tauri 默认的 `tauri build`。默认入口已固定为：
+
+```powershell
+cd apps/codex-plus-manager
+npm run build
+```
+
+该命令会调用 `scripts/package-windows.ps1`，只生成 NSIS `setup.exe`：
+
+```text
+dist/windows/CodexPlusPlus-<version>-windows-x64-setup.exe
+```
+
+打包规范：
+
+- 使用完整 Rust workspace release 构建，不能只构建 manager。
+- 安装器必须同时包含 `codex-plus-plus.exe`（静默启动入口）和 `codex-plus-plus-manager.exe`（管理器）。管理器的“重启 Codex++”会从安装目录调用前者，缺少它会触发 Windows `os error 2`。
+- `scripts/package-windows.ps1` 会在打包前校验两个 exe，在 NSIS 完成后校验 setup 文件存在且大小合理；任一检查失败都必须视为构建失败。
+- `apps/codex-plus-manager/src-tauri/tauri.conf.json` 保持 `bundle.active = false`。Tauri 默认 bundle 可能只带 manager，不能作为本项目的发布安装包流程。
+- `-SkipBuild` 只适用于已确认 `target/release` 中两个 exe 均来自同一次完整构建的场景。
+
+如果需要修改版本号，先同步 `apps/codex-plus-manager/src-tauri/tauri.conf.json` 中的 `version`，再执行上述命令。安装前请退出正在运行的 Codex++，避免文件被占用。
 
 ## 当前功能
 

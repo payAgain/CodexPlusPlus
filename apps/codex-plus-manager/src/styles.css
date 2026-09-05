@@ -6957,14 +6957,41 @@ select {
 .codex-x-toggle.on span { transform: translateX(20px); background: #16804d; }
 .codex-x-card-footer { display: flex; align-items: center; gap: 7px; margin-top: auto; border-top: 1px solid var(--cx-line); padding-top: 12px; color: var(--cx-muted); font-size: 11px; }
 .codex-x-card-footer span { margin-right: auto; }
-.codex-x-card-footer button { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--cx-line); border-radius: 8px; background: transparent; color: var(--cx-muted); }
+.codex-x-card-footer button { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--cx-line); border-radius: 8px; background: transparent; color: var(--cx-muted); cursor: pointer; transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, color 140ms ease; }
+.codex-x-card-footer button:hover { border-color: var(--cx-blue); background: color-mix(in srgb, var(--cx-blue) 12%, transparent); color: var(--cx-blue); transform: translateY(-1px); }
+.codex-x-card-footer button:active { transform: translateY(1px) scale(.94); }
 .codex-x-empty { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 150px; border: 1px dashed var(--cx-line); border-radius: 12px; color: var(--cx-muted); }
-.codex-x-editor-panel { border: 1px solid var(--cx-line); border-radius: 16px; background: var(--cx-surface); overflow: hidden; }
+.codex-x-editor-backdrop { z-index: 80; }
+.codex-x-editor-panel { width: min(720px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px)); border: 1px solid var(--cx-line); border-radius: 16px; background: var(--cx-surface); overflow: hidden; animation: codex-x-editor-in 180ms ease-out both; }
 .codex-x-editor-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--cx-line); padding: 16px 20px; }
 .codex-x-editor-head > div { display: flex; align-items: center; gap: 8px; }
-.codex-x-editor-head button { border: 0; background: transparent; color: var(--cx-muted); font-size: 22px; }
+.codex-x-editor-head button { border: 0; background: transparent; color: var(--cx-muted); font-size: 22px; cursor: pointer; transition: transform 140ms ease, color 140ms ease; }
+.codex-x-editor-head button:hover { color: var(--cx-text); transform: rotate(90deg); }
 .codex-x-editor-grid { display: grid; gap: 10px; padding: 18px; }
 .codex-x-editor-grid select { min-height: 36px; border: 1px solid var(--cx-line); border-radius: 7px; background: var(--cx-canvas); color: var(--cx-text); padding: 0 10px; }
+.codex-x-editor-grid textarea { min-height: 240px; resize: vertical; }
+.codex-x-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.codex-x-save-button { transition: transform 140ms ease, box-shadow 140ms ease; }
+.codex-x-save-button:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgb(93 116 255 / 28%); }
+.codex-x-save-button:active { transform: translateY(1px) scale(.98); }
+.codex-x-saved-notice { position: fixed; right: 24px; bottom: 24px; z-index: 90; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #79c99c; border-radius: 10px; background: #18352a; color: #8ee0b2; padding: 10px 14px; box-shadow: 0 12px 30px rgb(0 0 0 / 24%); animation: codex-x-editor-in 180ms ease-out both; }
+.codex-x-repository-panel { width: min(720px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 48px)); overflow: auto; animation: codex-x-editor-in 180ms ease-out both; }
+.codex-x-repository-list { display: grid; gap: 8px; }
+.codex-x-repository-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--cx-line); border-radius: 10px; background: var(--cx-canvas); padding: 12px; }
+.codex-x-repository-row > div:first-child { min-width: 0; display: grid; gap: 4px; }
+.codex-x-repository-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.codex-x-repository-row small { color: var(--cx-muted); overflow-wrap: anywhere; }
+.codex-x-repository-actions { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.codex-x-repository-toggle, .codex-x-repository-delete { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; border: 1px solid var(--cx-line); border-radius: 7px; background: transparent; color: var(--cx-muted); padding: 0 10px; cursor: pointer; transition: transform 140ms ease, border-color 140ms ease, color 140ms ease, background 140ms ease; }
+.codex-x-repository-toggle.active { border-color: #79c99c; background: #18352a; color: #8ee0b2; }
+.codex-x-repository-toggle:hover, .codex-x-repository-delete:hover { border-color: var(--cx-blue); color: var(--cx-blue); }
+.codex-x-repository-toggle:active, .codex-x-repository-delete:active { transform: scale(.95); }
+.codex-x-repository-delete { width: 32px; padding: 0; }
+.codex-x-repository-built-in { color: var(--cx-muted); font-size: 11px; }
+.codex-x-repository-form { display: grid; gap: 10px; margin-top: 18px; border-top: 1px solid var(--cx-line); padding-top: 18px; }
+.codex-x-repository-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@keyframes codex-x-editor-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (max-width: 640px) { .codex-x-repository-row { align-items: flex-start; flex-direction: column; } .codex-x-repository-actions { width: 100%; justify-content: flex-end; } .codex-x-repository-form-row { grid-template-columns: 1fr; } }
 .spin { animation: cx-tool-spin .8s linear infinite; }
 @media (max-width: 1050px) { .codex-x-prompt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .codex-x-prompts-header, .codex-x-category-toolbar { align-items: stretch; flex-direction: column; } .codex-x-header-actions { justify-content: flex-start; } .codex-x-mode-panel { grid-template-columns: 1fr; } .codex-x-mode-panel > div + div { border-top: 1px solid var(--cx-line); border-left: 0; } .codex-x-prompt-grid { grid-template-columns: 1fr; } .codex-x-category-tabs { overflow-x: auto; } }

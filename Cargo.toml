@@ -5,6 +5,7 @@ members = [
   "crates/codex-plus-data",
   "apps/codex-plus-launcher",
   "apps/codex-plus-manager/src-tauri",
+  "services/config-sync",
 ]
 
 [workspace.package]
@@ -16,6 +17,7 @@ repository = "https://github.com/BigPizzaV3/CodexPlusPlus"
 [workspace.dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
 directories = "6"
 fs2 = "0.4"
@@ -28,6 +30,7 @@ sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "time"] }
+tokio-util = "0.7"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 toml = "0.8"
 toml_edit = "0.22"

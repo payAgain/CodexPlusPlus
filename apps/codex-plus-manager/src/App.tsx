@@ -113,7 +113,15 @@ import { resolveProviderName } from "./provider-name";
 import { resolveProviderSyncCompletion } from "./provider-sync-flow";
 import { resolveLaunchStatus } from "./launch-status";
 import { getLanguage, t, tf, toggleLanguage } from "@/i18n";
-import { readPromptCatalogCache, syncCodexXPromptCatalog, type PromptCatalogItem } from "./prompt-catalog";
+import {
+  createPromptRepository,
+  readPromptCatalogCache,
+  readPromptRepositories,
+  syncPromptRepositories,
+  writePromptRepositories,
+  type PromptCatalogItem,
+  type PromptRepository,
+} from "./prompt-catalog";
 
 const isWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent);
 type Status = "ok" | "failed" | "not_implemented" | "not_checked" | string;
@@ -178,6 +186,12 @@ type RemotePluginMarketplaceResult = CommandResult<{
 }>;
 
 type BackendSettings = {
+  configSyncEnabled: boolean;
+  configSyncServerUrl: string;
+  configSyncDeviceName: string;
+  configSyncDeviceId: string;
+  configSyncDeviceToken: string;
+  configSyncEncryptedSecret: string;
   codexAppPath: string;
   codexExtraArgs: string[];
   providerSyncEnabled: boolean;
@@ -846,7 +860,7 @@ type StartupResult = CommandResult<{
   showUpdate: boolean;
 }>;
 
-type Route = "overview" | "relay" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "userScripts" | "prompts" | "toml" | "maintenance" | "about" | "settings";
+type Route = "overview" | "relay" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "userScripts" | "prompts" | "toml" | "maintenance" | "about" | "settings" | "sync";
 type Theme = "dark" | "light";
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
@@ -863,6 +877,7 @@ const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string
   { id: "maintenance", label: t("安装维护"), icon: Wrench },
   { id: "about", label: t("关于"), icon: Info },
   { id: "settings", label: t("设置"), icon: Settings },
+  { id: "sync", label: t("配置同步"), icon: RefreshCw },
   { id: "relayEnvironment", label: t("中转站环境配置检测"), icon: ShieldCheck },
 ];
 
@@ -877,12 +892,18 @@ const navigationSections: Array<{ label: string; routes: Route[]; placement?: "b
   },
   {
     label: t("系统"),
-    routes: ["maintenance", "about", "settings"],
+    routes: ["maintenance", "about", "sync", "settings"],
     placement: "bottom",
   },
 ];
 
 const defaultSettings: BackendSettings = {
+  configSyncEnabled: false,
+  configSyncServerUrl: "",
+  configSyncDeviceName: "",
+  configSyncDeviceId: "",
+  configSyncDeviceToken: "",
+  configSyncEncryptedSecret: "",
   codexAppPath: "",
   codexExtraArgs: [],
   providerSyncEnabled: false,
@@ -1898,6 +1919,19 @@ export function App() {
     return null;
   };
 
+  const connectConfigSync = async (serverUrl: string, username: string, password: string, deviceName: string) => {
+    const result = await run(() => call<CommandResult<{ deviceId: string; deviceToken: string }>>("config_sync_connect", {
+      request: { serverUrl, username, password, deviceName },
+    }));
+    if (result && isSuccessStatus(result.status)) {
+      await refreshSettings(true);
+      showNotice(t("配置同步"), result.message, result.status);
+    } else if (result) {
+      showNotice(t("配置同步"), result.message, result.status);
+    }
+    return result;
+  };
+
   const beginWeixinQrLogin = async () => {
     const result = await run(() => call<WeixinQrResult>("weixin_connect_qr_start", {
       baseUrl: settingsForm.weixinConnectBaseUrl,
@@ -2555,6 +2589,22 @@ export function App() {
       performUpdate,
       saveSettings,
       saveSettingsValue,
+      connectConfigSync,
+      configSyncNow: async () => {
+        const result = await run(() => call<CommandResult<{ uploaded: number; downloaded: number; cursor: number }>>("config_sync_now"));
+        if (result) showNotice(t("配置同步"), result.message, result.status);
+        return result;
+      },
+      configSyncPushLocal: async () => {
+        const result = await run(() => call<CommandResult<{ files: number; cursor: number }>>("config_sync_push_local"));
+        if (result) showNotice(t("配置同步"), result.message, result.status);
+        return result;
+      },
+      configSyncPullRemote: async () => {
+        const result = await run(() => call<CommandResult<{ files: number; cursor: number }>>("config_sync_pull_remote"));
+        if (result) showNotice(t("配置同步"), result.message, result.status);
+        return result;
+      },
       refreshSettings,
       resetSettings,
       resetImageOverlaySettings,
@@ -2925,6 +2975,9 @@ export function App() {
               actions={actions}
             />
           ) : null}
+          {route === "sync" ? (
+            <ConfigSyncScreen form={settingsForm} onFormChange={setSettingsForm} actions={actions} />
+          ) : null}
         </section>
       </main>
       {notice ? (
@@ -2964,6 +3017,85 @@ export function App() {
   );
 }
 
+function ConfigSyncScreen({
+  form,
+  onFormChange,
+  actions,
+}: {
+  form: BackendSettings;
+  onFormChange: (value: BackendSettings) => void;
+  actions: Actions;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const connected = Boolean(form.configSyncDeviceId && form.configSyncDeviceToken);
+
+  const connect = async () => {
+    if (!form.configSyncServerUrl.trim() || !username.trim() || !password) return;
+    setConnecting(true);
+    try {
+      await actions.connectConfigSync(
+        form.configSyncServerUrl.trim(),
+        username.trim(),
+        password,
+        form.configSyncDeviceName.trim() || "Codex++ device",
+      );
+      setPassword("");
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  return (
+    <>
+      <Panel>
+        <CardHead title={t("配置同步")} detail={t("通过自建服务器实时同步 Codex++ 配置")} />
+        <CardContent>
+          <div className="metric-list">
+            <Metric label={t("连接状态")} value={connected ? t("已连接") : t("未连接")} />
+            <Metric label={t("设备 ID")} value={form.configSyncDeviceId || "-"} />
+          </div>
+          <label className="check-row">
+            <input checked={form.configSyncEnabled} onChange={(event) => onFormChange({ ...form, configSyncEnabled: event.currentTarget.checked })} type="checkbox" />
+            <span>{t("启用实时配置同步")}</span>
+          </label>
+          <Field label={t("同步服务器地址")}>
+            <Input value={form.configSyncServerUrl} onChange={(event) => onFormChange({ ...form, configSyncServerUrl: event.currentTarget.value })} placeholder="https://codexpp.mdyself.com" />
+          </Field>
+          <Field label={t("设备名称")}>
+            <Input value={form.configSyncDeviceName} onChange={(event) => onFormChange({ ...form, configSyncDeviceName: event.currentTarget.value })} placeholder={t("例如：办公室电脑")} />
+          </Field>
+          {!connected ? (
+            <>
+              <Field label={t("同步账号")}>
+                <Input autoComplete="username" value={username} onChange={(event) => setUsername(event.currentTarget.value)} placeholder={t("输入同步账号")} />
+              </Field>
+              <Field label={t("同步密码")}>
+                <Input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder={t("输入同步密码")} />
+              </Field>
+              <Toolbar>
+                <Button disabled={connecting || !form.configSyncServerUrl.trim() || !username.trim() || !password} onClick={() => void connect()}>
+                  {connecting ? t("正在连接…") : t("连接并注册设备")}
+                </Button>
+              </Toolbar>
+            </>
+          ) : (
+            <>
+              <div className="hint-line"><CheckCircle2 className="h-4 w-4" /><span>{t("设备已注册。配置内容会在本机加密后上传。")}</span></div>
+              <Toolbar>
+                <Button onClick={() => void actions.configSyncNow()}><RefreshCw className="h-4 w-4" />{t("立即同步")}</Button>
+                <Button onClick={() => void actions.configSyncPushLocal()}><Upload className="h-4 w-4" />{t("推送本地")}</Button>
+                <Button onClick={() => void actions.configSyncPullRemote()}><Download className="h-4 w-4" />{t("拉取配置")}</Button>
+              </Toolbar>
+            </>
+          )}
+        </CardContent>
+      </Panel>
+    </>
+  );
+}
+
 type Actions = {
   refreshCurrent: () => Promise<void>;
   launch: () => Promise<void>;
@@ -2978,6 +3110,10 @@ type Actions = {
   performUpdate: () => Promise<void>;
   saveSettings: () => Promise<void>;
   saveSettingsValue: (settings: BackendSettings, silent?: boolean) => Promise<BackendSettings | null>;
+  connectConfigSync: (serverUrl: string, username: string, password: string, deviceName: string) => Promise<CommandResult<{ deviceId: string; deviceToken: string }> | null>;
+  configSyncNow: () => Promise<CommandResult<{ uploaded: number; downloaded: number; cursor: number }> | null>;
+  configSyncPushLocal: () => Promise<CommandResult<{ files: number; cursor: number }> | null>;
+  configSyncPullRemote: () => Promise<CommandResult<{ files: number; cursor: number }> | null>;
   refreshSettings: (silent?: boolean) => Promise<BackendSettings | null>;
   resetSettings: () => Promise<void>;
   resetImageOverlaySettings: () => Promise<void>;
@@ -4998,6 +5134,26 @@ function SettingsScreen({
   onFormChange: (value: BackendSettings) => void;
   actions: Actions;
 }) {
+  const [syncUsername, setSyncUsername] = useState("");
+  const [syncPassword, setSyncPassword] = useState("");
+  const [syncConnecting, setSyncConnecting] = useState(false);
+
+  const connectSync = async () => {
+    if (!form.configSyncServerUrl.trim() || !syncUsername.trim() || !syncPassword) return;
+    setSyncConnecting(true);
+    try {
+      await actions.connectConfigSync(
+        form.configSyncServerUrl.trim(),
+        syncUsername.trim(),
+        syncPassword,
+        form.configSyncDeviceName.trim() || "Codex++ device",
+      );
+      setSyncPassword("");
+    } finally {
+      setSyncConnecting(false);
+    }
+  };
+
   return (
     <div className="settings-page">
       <Panel>
@@ -5017,6 +5173,37 @@ function SettingsScreen({
               placeholder={t("例如 gpt-5.4-mini")}
             />
           </Field>
+          <div className="settings-block">
+            <div className="section-title-row"><strong>{t("配置同步")}</strong><span>{t("通过自建服务器实时同步 Codex++ 配置")}</span></div>
+            <label className="check-row">
+              <input checked={form.configSyncEnabled} onChange={(event) => onFormChange({ ...form, configSyncEnabled: event.currentTarget.checked })} type="checkbox" />
+              <span>{t("启用实时配置同步")}</span>
+            </label>
+            <Field label={t("同步服务器地址")}>
+              <Input value={form.configSyncServerUrl} onChange={(event) => onFormChange({ ...form, configSyncServerUrl: event.currentTarget.value })} placeholder="https://sync.example.com" />
+            </Field>
+            <Field label={t("设备名称")}>
+              <Input value={form.configSyncDeviceName} onChange={(event) => onFormChange({ ...form, configSyncDeviceName: event.currentTarget.value })} placeholder={t("例如：办公室电脑")} />
+            </Field>
+            {form.configSyncDeviceId ? (
+              <div className="hint-line"><Info className="h-4 w-4" /><span>{tf("已连接设备：{0}", [form.configSyncDeviceId])}</span></div>
+            ) : (
+              <>
+                <Field label={t("同步账号")}>
+                  <Input autoComplete="username" value={syncUsername} onChange={(event) => setSyncUsername(event.currentTarget.value)} />
+                </Field>
+                <Field label={t("同步密码")}>
+                  <Input autoComplete="current-password" type="password" value={syncPassword} onChange={(event) => setSyncPassword(event.currentTarget.value)} />
+                </Field>
+                <Toolbar>
+                  <Button disabled={syncConnecting || !form.configSyncServerUrl.trim() || !syncUsername.trim() || !syncPassword} onClick={() => void connectSync()}>
+                    {syncConnecting ? t("正在连接…") : t("连接并注册设备")}
+                  </Button>
+                </Toolbar>
+              </>
+            )}
+            <div className="hint-line"><Info className="h-4 w-4" /><span>{t("配置内容会在本机加密后上传；密码仅用于本次设备注册。")}</span></div>
+          </div>
           <div className="settings-block">
             <label className="check-row">
               <input
@@ -8024,27 +8211,44 @@ function CodexXPromptsScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [showEditor, setShowEditor] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState(false);
+  const [repositories, setRepositories] = useState<PromptRepository[]>(() => readPromptRepositories());
+  const [showRepositories, setShowRepositories] = useState(false);
+  const [repositoryDraft, setRepositoryDraft] = useState({ name: "", url: "", branch: "main", directory: "" });
   const importRef = useRef<HTMLInputElement>(null);
   const categories = ["全部", "破甲 / 逆向", "软件开发", "写作辅助", "自定义"];
   const visible = templates.filter((item) => category === "全部" || item.category === category);
   const persist = (next: PromptTemplate[]) => { setTemplates(next); localStorage.setItem("codex-plus-prompts", JSON.stringify(next)); };
   const mergeCatalog = (remote: PromptTemplate[]) => {
-    const custom = templates.filter((item) => item.source !== "codex-x");
+    const custom = templates.filter((item) => item.source === "local");
     const enabledById = new Map(templates.map((item) => [item.id, item.enabled]));
     persist([...remote.map((item) => ({ ...item, enabled: enabledById.get(item.id) ?? false })), ...custom]);
   };
   const sync = async () => {
     setSyncing(true); setSyncMessage("");
-    try { const result = await syncCodexXPromptCatalog(); mergeCatalog(result.items); setSyncMessage(result.fromCache ? t("已使用上次同步缓存") : t("已同步 Codex-X 上游模板")); }
+    try {
+      const result = await syncPromptRepositories(repositories);
+      mergeCatalog(result.items);
+      setSyncMessage(result.fromCache ? t("已使用上次同步缓存") : result.errors.length ? `${t("部分仓库同步失败")}: ${result.errors.join("；")}` : t("已同步提示词仓库"));
+    }
     catch (error) { setSyncMessage(error instanceof Error ? error.message : t("模板同步失败")); }
     finally { setSyncing(false); }
   };
   useEffect(() => { const cached = readPromptCatalogCache(); if (cached.length && !templates.some((item) => item.source === "codex-x")) mergeCatalog(cached); }, []);
-  const add = () => {
+  const saveDraft = () => {
     if (!draft.title.trim() || !draft.content.trim()) return;
     const filename = `${draft.title.trim().replace(/\s+/g, "-").toLowerCase()}.md`;
-    persist([...templates, { id: `local:${crypto.randomUUID()}`, ...draft, enabled: false, source: "local", filename, description: draft.content.trim().slice(0, 140) }]);
-    setDraft({ title: "", category: "软件开发", content: "" }); setShowEditor(false);
+    if (editingId) {
+      persist(templates.map((item) => item.id === editingId ? { ...item, ...draft, filename, description: draft.content.trim().slice(0, 140) } : item));
+    } else {
+      persist([...templates, { id: `local:${crypto.randomUUID()}`, ...draft, enabled: false, source: "local", filename, description: draft.content.trim().slice(0, 140) }]);
+    }
+    setDraft({ title: "", category: "软件开发", content: "" });
+    setEditingId(null);
+    setShowEditor(false);
+    setSavedNotice(true);
+    window.setTimeout(() => setSavedNotice(false), 1800);
   };
   const importMarkdown = (file?: File) => {
     if (!file) return;
@@ -8054,13 +8258,30 @@ function CodexXPromptsScreen() {
       setCategory("自定义");
     });
   };
+  const updateRepositories = (next: PromptRepository[]) => { setRepositories(next); writePromptRepositories(next); };
+  const addRepository = () => {
+    try {
+      const repository = createPromptRepository(repositoryDraft);
+      if (repositories.some((item) => item.id === repository.id)) throw new Error("这个仓库已经添加过了。");
+      updateRepositories([...repositories, repository]);
+      setRepositoryDraft({ name: "", url: "", branch: "main", directory: "" });
+      setSyncMessage(t("仓库已添加，请点击同步仓库"));
+    } catch (error) { setSyncMessage(error instanceof Error ? error.message : t("仓库地址无效")); }
+  };
+  const removeRepository = (repository: PromptRepository) => {
+    if (repository.builtIn) return;
+    updateRepositories(repositories.filter((item) => item.id !== repository.id));
+    persist(templates.filter((item) => item.repositoryId !== repository.id));
+  };
   return <section className="codex-x-prompts-page">
-    <header className="codex-x-prompts-header"><div><div className="codex-x-eyebrow"><Sparkles className="h-4 w-4" />PROMPT INJECTION</div><h2>{t("一键管理指令提示词")}</h2><p>{t("选择启用方式，再管理内置、在线或自定义的 Markdown 提示词。")}</p></div><div className="codex-x-header-actions"><input ref={importRef} type="file" accept=".md,text/markdown,text/plain" hidden onChange={(event) => importMarkdown(event.currentTarget.files?.[0])} /><Button variant="outline" onClick={() => void sync()} disabled={syncing}><RefreshCw className={`h-4 w-4 ${syncing ? "spin" : ""}`} />{syncing ? t("同步中...") : t("同步 GitHub 模板")}</Button><Button variant="outline" onClick={() => importRef.current?.click()}><Upload className="h-4 w-4" />{t("导入 md")}</Button><Button onClick={() => setShowEditor(true)}><Plus className="h-4 w-4" />{t("添加提示词")}</Button></div></header>
+    <header className="codex-x-prompts-header"><div><div className="codex-x-eyebrow"><Sparkles className="h-4 w-4" />PROMPT INJECTION</div><h2>{t("一键管理指令提示词")}</h2><p>{t("选择启用方式，再管理内置、在线或自定义的 Markdown 提示词。")}</p></div><div className="codex-x-header-actions"><input ref={importRef} type="file" accept=".md,text/markdown,text/plain" hidden onChange={(event) => importMarkdown(event.currentTarget.files?.[0])} /><Button variant="outline" onClick={() => void sync()} disabled={syncing}><RefreshCw className={`h-4 w-4 ${syncing ? "spin" : ""}`} />{syncing ? t("同步中...") : t("同步仓库")}</Button><Button variant="outline" onClick={() => setShowRepositories(true)}><Github className="h-4 w-4" />{t("仓库管理")}</Button><Button variant="outline" onClick={() => importRef.current?.click()}><Upload className="h-4 w-4" />{t("导入 md")}</Button><Button onClick={() => { setEditingId(null); setDraft({ title: "", category: "软件开发", content: "" }); setShowEditor(true); }}><Plus className="h-4 w-4" />{t("添加提示词")}</Button></div></header>
     {syncMessage ? <div className="codex-x-sync-message">{syncMessage}</div> : null}
     <section className="codex-x-mode-panel"><div><span className="codex-x-label">{t("当前状态")}</span><div className="codex-x-active-title"><span className="codex-x-state-dot" /><strong>{templates.some((item) => item.enabled) ? templates.find((item) => item.enabled)?.title : t("未启用提示词")}</strong></div><p>{templates.some((item) => item.enabled) ? t("当前模板正在生效") : t("先选择启用方式，再打开下方任一模板。")}</p></div><div className="codex-x-mode-choice"><div><strong>{t("启用方式")}</strong><span title={t("追加会保留原提示词，替换会使用当前模板")}><CircleHelp className="h-4 w-4" /></span><p>{t("点击模板开关时，使用这里选择的方式。")}</p></div><div className="codex-x-mode-buttons"><button className={injectionMode === "append" ? "active" : ""} onClick={() => setInjectionMode("append")}><CirclePlus className="h-4 w-4" />{t("保留原提示词")}</button><button className={injectionMode === "replace" ? "active" : ""} onClick={() => setInjectionMode("replace")}><ArrowLeftRight className="h-4 w-4" />{t("替换原提示词")}</button></div></div></section>
-    <div className="codex-x-category-toolbar"><div className="codex-x-category-tabs">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><button className="codex-x-category-manage" onClick={() => setCategory("自定义")}><Settings2 className="h-4 w-4" />{t("分类管理")}</button></div>
-    <div className="codex-x-prompt-grid">{visible.map((item) => <article className="codex-x-prompt-card" key={item.id}><div className="codex-x-card-top"><div className="codex-x-file-icon"><FileText className="h-5 w-5" /></div><strong title={item.title}>{item.title}</strong><button className={`codex-x-toggle ${item.enabled ? "on" : ""}`} onClick={() => persist(templates.map((entry) => entry.id === item.id ? { ...entry, enabled: !entry.enabled } : entry))} aria-label={item.enabled ? t("关闭") : t("启用")}><span /></button></div><p title={item.description}>{item.description}</p><div className="codex-x-card-footer"><span>{item.source === "codex-x" ? "Codex-X" : t("自定义")}</span><button title={t("编辑")} onClick={() => { setDraft({ title: item.title, category: item.category, content: item.content }); setShowEditor(true); }}><PencilLine className="h-4 w-4" /></button>{item.source === "local" ? <button title={t("删除")} onClick={() => persist(templates.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></button> : null}</div></article>)}{!visible.length ? <div className="codex-x-empty"><FileText className="h-5 w-5" />{t("该分类下暂无提示词")}</div> : null}</div>
-    {showEditor ? <section className="codex-x-editor-panel"><div className="codex-x-editor-head"><div><PencilLine className="h-4 w-4" /><strong>{t("添加提示词")}</strong></div><button onClick={() => setShowEditor(false)} aria-label={t("关闭")}>×</button></div><div className="codex-x-editor-grid"><Input id="prompt-title" placeholder={t("模板名称")} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })} /><select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.currentTarget.value })}>{categories.slice(1).map((item) => <option key={item}>{item}</option>)}</select><Textarea placeholder={t("输入提示词内容")} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.currentTarget.value })} /><Button onClick={add}><Save className="h-4 w-4" />{t("保存模板")}</Button></div></section> : null}
+    <div className="codex-x-category-toolbar"><div className="codex-x-category-tabs">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{t(item)}</button>)}</div><button className="codex-x-category-manage" onClick={() => setShowRepositories(true)}><Settings2 className="h-4 w-4" />{t("仓库管理")}</button></div>
+    <div className="codex-x-prompt-grid">{visible.map((item) => <article className="codex-x-prompt-card" key={item.id}><div className="codex-x-card-top"><div className="codex-x-file-icon"><FileText className="h-5 w-5" /></div><strong title={item.title}>{item.title}</strong><button type="button" className={`codex-x-toggle ${item.enabled ? "on" : ""}`} onClick={() => persist(templates.map((entry) => entry.id === item.id ? { ...entry, enabled: !entry.enabled } : entry))} aria-label={item.enabled ? t("关闭") : t("启用")}><span /></button></div><p title={item.description}>{item.description}</p><div className="codex-x-card-footer"><span>{item.source === "codex-x" ? "Codex-X" : t("自定义")}</span><button type="button" title={t("编辑")} onClick={() => { setEditingId(item.id); setDraft({ title: item.title, category: item.category, content: item.content }); setShowEditor(true); }}><PencilLine className="h-4 w-4" /></button>{item.source === "local" ? <button type="button" title={t("删除")} onClick={() => persist(templates.filter((entry) => entry.id !== item.id))}><Trash2 className="h-4 w-4" /></button> : null}</div></article>)}{!visible.length ? <div className="codex-x-empty"><FileText className="h-5 w-5" />{t("该分类下暂无提示词")}</div> : null}</div>
+    {showEditor ? <div className="modal-backdrop codex-x-editor-backdrop" role="dialog" aria-modal="true" onMouseDown={(event) => { if (event.target === event.currentTarget) { setEditingId(null); setShowEditor(false); } }}><section className="modal-card codex-x-editor-panel"><div className="codex-x-editor-head"><div><PencilLine className="h-4 w-4" /><strong>{editingId ? t("编辑提示词") : t("添加提示词")}</strong></div><button type="button" onClick={() => { setEditingId(null); setShowEditor(false); }} aria-label={t("关闭")}>×</button></div><div className="codex-x-editor-grid"><Input id="prompt-title" placeholder={t("模板名称")} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })} /><select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.currentTarget.value })}>{categories.slice(1).map((item) => <option key={item}>{item}</option>)}</select><Textarea placeholder={t("输入提示词内容")} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.currentTarget.value })} /><div className="codex-x-editor-actions"><Button className="codex-x-save-button" onClick={saveDraft}><Save className="h-4 w-4" />{t("保存模板")}</Button><Button variant="secondary" onClick={() => { setEditingId(null); setShowEditor(false); }}>{t("取消")}</Button></div></div></section></div> : null}
+    {savedNotice ? <div className="codex-x-saved-notice" role="status"><Save className="h-4 w-4" />{t("模板已保存")}</div> : null}
+    {showRepositories ? <div className="modal-backdrop codex-x-editor-backdrop" role="dialog" aria-modal="true" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowRepositories(false); }}><section className="modal-card codex-x-repository-panel"><div className="codex-x-editor-head"><div><Github className="h-4 w-4" /><strong>{t("提示词仓库管理")}</strong></div><button type="button" onClick={() => setShowRepositories(false)} aria-label={t("关闭")}>×</button></div><div className="codex-x-repository-list">{repositories.map((repository) => <div className="codex-x-repository-row" key={repository.id}><div><strong>{repository.name}</strong><small>github.com/{repository.owner}/{repository.repository} · {repository.branch}{repository.directory ? ` / ${repository.directory}` : ""}</small></div><div className="codex-x-repository-actions"><button type="button" className={`codex-x-repository-toggle ${repository.enabled ? "active" : ""}`} onClick={() => updateRepositories(repositories.map((item) => item.id === repository.id ? { ...item, enabled: !item.enabled } : item))}>{repository.enabled ? t("已启用") : t("已停用")}</button>{repository.builtIn ? <span className="codex-x-repository-built-in">{t("内置")}</span> : <button type="button" className="codex-x-repository-delete" title={t("删除仓库")} onClick={() => removeRepository(repository)}><Trash2 className="h-4 w-4" /></button>}</div></div>)}</div><div className="codex-x-repository-form"><strong>{t("添加仓库")}</strong><Input placeholder={t("仓库名称")} value={repositoryDraft.name} onChange={(event) => setRepositoryDraft({ ...repositoryDraft, name: event.currentTarget.value })} /><Input placeholder="https://github.com/owner/repository" value={repositoryDraft.url} onChange={(event) => setRepositoryDraft({ ...repositoryDraft, url: event.currentTarget.value })} /><div className="codex-x-repository-form-row"><Input placeholder={t("分支，默认 main")} value={repositoryDraft.branch} onChange={(event) => setRepositoryDraft({ ...repositoryDraft, branch: event.currentTarget.value })} /><Input placeholder={t("目录，可留空")} value={repositoryDraft.directory} onChange={(event) => setRepositoryDraft({ ...repositoryDraft, directory: event.currentTarget.value })} /></div><Button onClick={addRepository}><Plus className="h-4 w-4" />{t("添加仓库")}</Button></div></section></div> : null}
   </section>;
 }
 
@@ -8098,6 +8319,7 @@ function routeSubtitle(route: Route) {
     userScripts: t("内置和用户自定义脚本清单"),
     maintenance: t("入口安装、修复、Watcher 与手动启动"),
     about: t("版本信息、项目链接、GitHub Release 更新、日志与诊断"),
+    sync: t("实时同步配置、管理设备与连接状态"),
     settings: t("主题和启动参数"),
   };
   return subtitles[route];

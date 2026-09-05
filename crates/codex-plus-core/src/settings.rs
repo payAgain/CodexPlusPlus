@@ -249,6 +249,20 @@ pub enum RelayMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BackendSettings {
+    #[serde(rename = "configSyncEnabled", default)]
+    pub config_sync_enabled: bool,
+    #[serde(rename = "configSyncServerUrl", default)]
+    pub config_sync_server_url: String,
+    #[serde(rename = "configSyncDeviceName", default)]
+    pub config_sync_device_name: String,
+    #[serde(rename = "configSyncDeviceId", default)]
+    pub config_sync_device_id: String,
+    #[serde(rename = "configSyncDeviceToken", default)]
+    pub config_sync_device_token: String,
+    #[serde(rename = "configSyncCursor", default)]
+    pub config_sync_cursor: u64,
+    #[serde(rename = "configSyncEncryptedSecret", default)]
+    pub config_sync_encrypted_secret: String,
     #[serde(rename = "codexAppPath", default)]
     pub codex_app_path: String,
     #[serde(rename = "codexExtraArgs", default)]
@@ -364,6 +378,13 @@ pub struct BackendSettings {
 impl Default for BackendSettings {
     fn default() -> Self {
         Self {
+            config_sync_enabled: false,
+            config_sync_server_url: String::new(),
+            config_sync_device_name: String::new(),
+            config_sync_device_id: String::new(),
+            config_sync_device_token: String::new(),
+            config_sync_cursor: 0,
+            config_sync_encrypted_secret: String::new(),
             codex_app_path: String::new(),
             codex_extra_args: Vec::new(),
             provider_sync_enabled: false,

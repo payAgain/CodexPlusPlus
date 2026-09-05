@@ -1,0 +1,25 @@
+services:
+  config-sync:
+    build:
+      context: ../../..
+      dockerfile: services/config-sync/Dockerfile
+    restart: unless-stopped
+    environment:
+      CONFIG_SYNC_BIND: 0.0.0.0:8080
+      CONFIG_SYNC_DB_PATH: /var/lib/codex-config-sync/sync.sqlite
+      CONFIG_SYNC_BOOTSTRAP_USER: ${CONFIG_SYNC_BOOTSTRAP_USER}
+      CONFIG_SYNC_BOOTSTRAP_PASSWORD: ${CONFIG_SYNC_BOOTSTRAP_PASSWORD}
+    expose:
+      - "8080"
+    ports:
+      - "127.0.0.1:8082:8080"
+    volumes:
+      - sync-data:/var/lib/codex-config-sync
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  sync-data:
