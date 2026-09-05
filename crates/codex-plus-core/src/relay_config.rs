@@ -1897,8 +1897,15 @@ fn apply_model_catalog_to_config(
                 serde_json::from_str(&profile.model_windows).unwrap_or_default(),
             )
         };
-    let entries =
-        crate::model_suffix::collect_catalog_entries(&model_list, &model_windows, &profile.model);
+    let model_auto_compact =
+        parse_model_string_map(&profile.model_auto_compact, "model_auto_compact")?;
+    validate_model_auto_compact(&model_auto_compact)?;
+    let entries = crate::model_suffix::collect_catalog_entries(
+        &model_list,
+        &model_windows,
+        &model_auto_compact,
+        &profile.model,
+    );
     let fallback = parse_optional_positive_u64(&profile.context_window, "上下文大小")?;
     // 用户已手写 model_catalog_json 指针时保留，不覆盖（保 preserves_user_model_catalog_json 测试）
     // 仅当现有指针指向本 profile 自己生成的 catalog 时才重新生成。
