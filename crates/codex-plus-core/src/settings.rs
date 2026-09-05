@@ -259,6 +259,8 @@ pub struct BackendSettings {
     pub config_sync_device_id: String,
     #[serde(rename = "configSyncDeviceToken", default)]
     pub config_sync_device_token: String,
+    #[serde(rename = "configSyncToken", default)]
+    pub config_sync_token: String,
     #[serde(rename = "configSyncCursor", default)]
     pub config_sync_cursor: u64,
     #[serde(rename = "configSyncEncryptedSecret", default)]
@@ -383,6 +385,7 @@ impl Default for BackendSettings {
             config_sync_device_name: String::new(),
             config_sync_device_id: String::new(),
             config_sync_device_token: String::new(),
+            config_sync_token: String::new(),
             config_sync_cursor: 0,
             config_sync_encrypted_secret: String::new(),
             codex_app_path: String::new(),

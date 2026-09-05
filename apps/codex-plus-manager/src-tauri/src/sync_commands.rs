@@ -1,5 +1,5 @@
 use codex_plus_core::sync::{
-    SyncClient, SyncClientConfig,
+    new_device_id,
     engine::{Engine, OPERATION_LOCK, Operation, Status},
 };
 use codex_plus_core::settings::SettingsStore;
@@ -29,8 +29,7 @@ pub async fn config_sync_status() -> ResultPayload<Status> {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectRequest {
     server_url: String,
-    username: String,
-    password: String,
+    token: String,
     device_name: String,
 }
 
@@ -38,16 +37,15 @@ pub struct ConnectRequest {
 pub async fn config_sync_connect(request: ConnectRequest) -> ResultPayload<()> {
     let _guard = OPERATION_LOCK.lock().await;
     result(async {
-        let login = SyncClient::login(&request.server_url, &request.username, &request.password).await?;
-        let client = SyncClient::new(SyncClientConfig { server_url: request.server_url.clone(), access_token: login.access_token, device_token: String::new(), device_id: String::new() })?;
-        let device = client.register_device(&request.device_name).await?;
+        anyhow::ensure!(!request.token.trim().is_empty(), "请输入同步令牌");
         let store = SettingsStore::default();
         let mut settings = store.load()?;
         settings.config_sync_enabled = false;
         settings.config_sync_server_url = request.server_url;
         settings.config_sync_device_name = request.device_name;
-        settings.config_sync_device_id = device.device_id;
-        settings.config_sync_device_token = device.device_token;
+        if settings.config_sync_device_id.is_empty() { settings.config_sync_device_id = new_device_id(); }
+        settings.config_sync_token = request.token.trim().to_owned();
+        settings.config_sync_device_token.clear();
         settings.config_sync_cursor = 0;
         store.save(&settings)?;
         Ok(())
@@ -78,18 +76,6 @@ pub async fn config_sync_now() -> ResultPayload<Status> {
 pub async fn config_sync_set_enabled(enabled: bool) -> ResultPayload<Status> {
     let _guard = OPERATION_LOCK.lock().await;
     result(Engine::default().set_enabled(enabled).await)
-}
-
-#[tauri::command]
-pub async fn config_sync_export_key() -> ResultPayload<String> {
-    let _guard = OPERATION_LOCK.lock().await;
-    result(Engine::default().recovery_key())
-}
-
-#[tauri::command]
-pub async fn config_sync_import_key(secret: String) -> ResultPayload<()> {
-    let _guard = OPERATION_LOCK.lock().await;
-    result(Engine::default().import_key(secret))
 }
 
 pub fn start_background() {

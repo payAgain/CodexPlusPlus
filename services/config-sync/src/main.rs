@@ -94,7 +94,7 @@ async fn revoke_device(State(state): State<AppState>, headers: HeaderMap, axum::
 }
 
 async fn read_changes(State(state): State<AppState>, headers: HeaderMap, Query(cursor): Query<Cursor>) -> Result<Json<ChangeList>, StatusCode> {
-    let user = authenticate(&state, &headers, "device")?; let from = cursor.cursor.unwrap_or(0); let db = state.db.lock().unwrap();
+    let user = authenticate_shared(&state, &headers)?; let from = cursor.cursor.unwrap_or(0); let db = state.db.lock().unwrap();
     let mut statement = db.prepare("SELECT version,change_id,device_id,files,username FROM events WHERE username=? AND version>? ORDER BY version").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let events = statement.query_map(params![user, from], |row| Ok(Event { version: row.get(0)?, change_id: row.get(1)?, device_id: row.get(2)?, files: serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(3)?).unwrap_or_default(), username: row.get(4).unwrap_or_default() })).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.collect::<Result<Vec<_>, _>>().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let latest_version: u64 = db.query_row("SELECT COALESCE(MAX(version),0) FROM events WHERE username=?", [&user], |row| row.get(0)).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -110,11 +110,12 @@ async fn force_push(State(state): State<AppState>, headers: HeaderMap, Json(inpu
 }
 
 fn commit_change(state: &AppState, headers: &HeaderMap, input: Change, replace: bool) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    let user = authenticate(state, headers, "device")?;
+    let user = authenticate_shared(state, headers)?;
     let id = input.change_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     if id.is_empty() || id.len() > 128 || !valid_files(&input.files) { return Err(StatusCode::BAD_REQUEST); }
     let mut db = state.db.lock().unwrap();
-    check_device(&db, headers, &input.device_id)?;
+    if input.device_id.trim().is_empty() || input.device_id.len() > 128 { return Err(StatusCode::BAD_REQUEST); }
+    if std::env::var("CONFIG_SYNC_SHARED_TOKEN").is_err() { check_device(&db, headers, &input.device_id)?; }
     let tx = db.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let Some(event) = load_event(&tx, &id)? {
         let was_replace = tx.query_row("SELECT EXISTS(SELECT 1 FROM replacements WHERE version=?)", [event.version], |r| r.get::<_, bool>(0)).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -154,7 +155,7 @@ fn snapshot(db: &Connection, user: &str) -> Result<Snapshot, StatusCode> {
 }
 
 async fn read_snapshot(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Snapshot>, StatusCode> {
-    let user = authenticate(&state, &headers, "device")?;
+    let user = authenticate_shared(&state, &headers)?;
     Ok(Json(snapshot(&state.db.lock().unwrap(), &user)?))
 }
 
@@ -163,9 +164,9 @@ async fn read_snapshot(State(state): State<AppState>, headers: HeaderMap) -> Res
 struct Ack { device_id: String, version: u64, hashes: std::collections::BTreeMap<String, Option<String>> }
 
 async fn acknowledge(State(state): State<AppState>, headers: HeaderMap, Json(input): Json<Ack>) -> Result<StatusCode, StatusCode> {
-    let user = authenticate(&state, &headers, "device")?;
+    let user = authenticate_shared(&state, &headers)?;
     let db = state.db.lock().unwrap();
-    check_device(&db, &headers, &input.device_id)?;
+    if input.device_id.trim().is_empty() || input.device_id.len() > 128 { return Err(StatusCode::BAD_REQUEST); }
     let current = snapshot(&db, &user)?;
     let hashes: std::collections::BTreeMap<_, _> = current.files.iter().map(|f| {
         (f["path"].as_str().unwrap_or_default().to_owned(), if f["deleted"] == true { None } else { f["contentHash"].as_str().map(str::to_owned) })
@@ -175,6 +176,14 @@ async fn acknowledge(State(state): State<AppState>, headers: HeaderMap, Json(inp
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn authenticate_shared(state: &AppState, headers: &HeaderMap) -> Result<String, StatusCode> {
+    let token = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).ok_or(StatusCode::UNAUTHORIZED)?;
+    if let Ok(expected) = std::env::var("CONFIG_SYNC_SHARED_TOKEN") {
+        if expected.is_empty() || token != expected { return Err(StatusCode::UNAUTHORIZED); }
+        return Ok(std::env::var("CONFIG_SYNC_BOOTSTRAP_USER").unwrap_or_else(|_| "shared".into()));
+    }
+    authenticate(state, headers, "device")
+}
 fn check_device(db: &Connection, headers: &HeaderMap, device: &str) -> Result<(), StatusCode> {
     let token = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).ok_or(StatusCode::UNAUTHORIZED)?;
     let valid = db.query_row("SELECT EXISTS(SELECT 1 FROM tokens t JOIN devices d ON t.device_id=d.device_id WHERE t.token_hash=? AND t.kind='device' AND d.device_id=? AND d.revoked=0)", params![hash(token), device], |r| r.get::<_, bool>(0)).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -188,7 +197,7 @@ async fn ready(State(state): State<AppState>) -> StatusCode {
     }
 }
 async fn websocket_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
-    let user = authenticate(&state, &headers, "device")?;
+    let user = authenticate_shared(&state, &headers)?;
     Ok(ws.on_upgrade(move |socket| websocket(socket, state, user, headers)))
 }
 async fn websocket(mut socket: WebSocket, state: AppState, username: String, headers: HeaderMap) {
@@ -197,7 +206,7 @@ async fn websocket(mut socket: WebSocket, state: AppState, username: String, hea
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
-                if authenticate(&state, &headers, "device").is_err() { break; }
+                if authenticate_shared(&state, &headers).is_err() { break; }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break; }
             },
             message = socket.recv() => match message {
@@ -208,7 +217,7 @@ async fn websocket(mut socket: WebSocket, state: AppState, username: String, hea
             event = events.recv() => {
                 match event {
                     Ok(event) if event.username == username => {
-                        if authenticate(&state, &headers, "device").is_err() { break; }
+                        if authenticate_shared(&state, &headers).is_err() { break; }
                         if socket.send(Message::Text(serde_json::to_string(&event).unwrap_or_default().into())).await.is_err() { break; }
                     },
                     Err(broadcast::error::RecvError::Lagged(_)) => break,

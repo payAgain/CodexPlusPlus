@@ -52,7 +52,6 @@ pub struct Status {
     pub last_sync: Option<u64>,
     pub error: String,
     pub files: usize,
-    pub has_recovery_key: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -74,13 +73,14 @@ impl Engine {
 
     fn session(&self) -> anyhow::Result<(SyncClient, LocalState)> {
         let settings = SettingsStore::new(self.settings_path.clone()).load()?;
-        ensure!(!settings.config_sync_device_token.is_empty(), "请先连接并注册设备");
+        let shared_token = if !settings.config_sync_token.is_empty() { settings.config_sync_token.clone() } else { settings.config_sync_device_token.clone() };
+        ensure!(!shared_token.is_empty(), "请先输入同步令牌");
         let mut state = self.state()?;
         let server = settings.config_sync_server_url.trim_end_matches('/').to_string();
-        if state.server != server || state.device != settings.config_sync_device_id {
-            state = LocalState { server: server.clone(), device: settings.config_sync_device_id.clone(), ..Default::default() };
+        if state.server != server || state.device != settings.config_sync_device_id || state.secret != shared_token {
+            state = LocalState { server: server.clone(), device: settings.config_sync_device_id.clone(), secret: shared_token.clone(), ..Default::default() };
         }
-        let client = SyncClient::new(SyncClientConfig { server_url: server, access_token: String::new(), device_token: settings.config_sync_device_token, device_id: settings.config_sync_device_id })?;
+        let client = SyncClient::new(SyncClientConfig { server_url: server, shared_token, device_id: settings.config_sync_device_id })?;
         Ok((client, state))
     }
 
@@ -211,10 +211,15 @@ impl Engine {
     }
 
     pub async fn status(&self) -> anyhow::Result<Status> {
-        let (client, state) = self.session()?;
-        let mut result = Status { enabled: state.enabled, local_version: state.version, last_sync: state.last_sync, error: state.error.clone(), has_recovery_key: !state.secret.is_empty(), ..Default::default() };
+        let (client, mut state) = self.session()?;
+        let mut result = Status { enabled: state.enabled, local_version: state.version, last_sync: state.last_sync, error: state.error.clone(), ..Default::default() };
         match client.snapshot().await {
             Ok(remote) => {
+                if !state.error.is_empty() {
+                    state.error.clear();
+                    self.save(&state)?;
+                }
+                result.error.clear();
                 result.connected = true;
                 result.server_version = remote.version;
                 result.files = remote.files.len();
@@ -242,22 +247,6 @@ impl Engine {
         self.status().await
     }
 
-    pub fn recovery_key(&self) -> anyhow::Result<String> {
-        let (_, state) = self.session()?;
-        ensure!(!state.secret.is_empty(), "请先推送本地生成恢复密钥，或导入源设备密钥");
-        Ok(state.secret)
-    }
-
-    pub fn import_key(&self, secret: String) -> anyhow::Result<()> {
-        ensure!(BASE64.decode(&secret)?.len() == 32, "恢复密钥格式不正确");
-        let (_, mut state) = self.session()?;
-        state.secret = secret;
-        state.enabled = false;
-        state.hashes.clear();
-        state.version = 0;
-        self.save(&state)
-    }
-
     pub async fn execute(&self, mode: Operation) -> anyhow::Result<Status> {
         let (client, mut state) = self.session()?;
         let result = self.execute_inner(&client, &mut state, mode).await;
@@ -279,7 +268,7 @@ impl Engine {
             Operation::Pull => false,
             Operation::Auto => {
                 if !state.enabled { return Ok(()); }
-                ensure!(!state.hashes.is_empty() && !state.secret.is_empty(), "请先对齐配置");
+                ensure!(!state.hashes.is_empty(), "请先对齐配置");
                 let local_changed = local_hashes != state.hashes;
                 let remote_changed = remote.version != state.version;
                 if remote_changed && local_changed {
@@ -296,13 +285,6 @@ impl Engine {
         // 显式覆盖后也不自动打开开关，必须再次经过对齐确认。
         if !matches!(mode, Operation::Auto) { state.enabled = false; }
         if push {
-            if state.secret.is_empty() {
-                let mut key = [0u8; 32];
-                use aes_gcm::aead::rand_core::RngCore;
-                OsRng.fill_bytes(&mut key);
-                state.secret = BASE64.encode(key);
-                self.save(state)?;
-            }
             for (name, raw) in &local { if let Some(raw) = raw { validate_content(name, raw)?; } }
             let change = SyncChange { change_id: new_device_id(), device_id: state.device.clone(), base_version: state.version, files: self.encrypt(&local, state)? };
             let result = if matches!(mode, Operation::Push) { client.force_push(&change).await? } else { client.push(&change).await? };
@@ -314,7 +296,6 @@ impl Engine {
             state.version = version;
             state.hashes = local_hashes;
         } else {
-            ensure!(!state.secret.is_empty(), "请先导入源设备的恢复密钥");
             let decoded = self.decrypt(&remote, &state.secret)?;
             self.apply(&decoded, &local)?;
             ensure!(self.collect()? == decoded, "写回后配置校验失败");
@@ -385,7 +366,7 @@ pub async fn run_background(engine: Engine) {
         };
         let Some((client, _)) = connection else { tokio::time::sleep(Duration::from_secs(2)).await; continue; };
         let mut request = match client.websocket_url().into_client_request() { Ok(v) => v, Err(_) => { tokio::time::sleep(Duration::from_secs(5)).await; continue; } };
-        if let Ok(value) = format!("Bearer {}", client.config.device_token).parse() { request.headers_mut().insert("Authorization", value); }
+        if let Ok(value) = format!("Bearer {}", client.config.shared_token).parse() { request.headers_mut().insert("Authorization", value); }
         let socket = tokio::time::timeout(Duration::from_secs(15), tokio_tungstenite::connect_async(request)).await;
         let mut socket = match socket { Ok(Ok((socket, _))) => Some(socket), _ => None };
         let mut tick = tokio::time::interval(Duration::from_secs(2));

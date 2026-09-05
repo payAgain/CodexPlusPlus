@@ -63,8 +63,6 @@ pub fn run() {
             sync_commands::config_sync_push_local,
             sync_commands::config_sync_pull_remote,
             sync_commands::config_sync_set_enabled,
-            sync_commands::config_sync_export_key,
-            sync_commands::config_sync_import_key,
             commands::weixin_connect_qr_start,
             commands::weixin_connect_qr_status,
             commands::weixin_connect_status,

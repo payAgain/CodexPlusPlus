@@ -191,6 +191,7 @@ type BackendSettings = {
   configSyncDeviceName: string;
   configSyncDeviceId: string;
   configSyncDeviceToken: string;
+  configSyncToken: string;
   configSyncEncryptedSecret: string;
   codexAppPath: string;
   codexExtraArgs: string[];
@@ -903,6 +904,7 @@ const defaultSettings: BackendSettings = {
   configSyncDeviceName: "",
   configSyncDeviceId: "",
   configSyncDeviceToken: "",
+  configSyncToken: "",
   configSyncEncryptedSecret: "",
   codexAppPath: "",
   codexExtraArgs: [],
@@ -1919,9 +1921,9 @@ export function App() {
     return null;
   };
 
-  const connectConfigSync = async (serverUrl: string, username: string, password: string, deviceName: string) => {
-    const result = await run(() => call<CommandResult<{ deviceId: string; deviceToken: string }>>("config_sync_connect", {
-      request: { serverUrl, username, password, deviceName },
+  const connectConfigSync = async (serverUrl: string, token: string, deviceName: string) => {
+    const result = await run(() => call<CommandResult<unknown>>("config_sync_connect", {
+      request: { serverUrl, token, deviceName },
     }));
     if (result && isSuccessStatus(result.status)) {
       await refreshSettings(true);
@@ -3026,15 +3028,12 @@ function ConfigSyncScreen({
   onFormChange: (value: BackendSettings) => void;
   actions: Actions;
 }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [syncStatus, setSyncStatus] = useState<ConfigSyncState | null>(null);
   const [syncError, setSyncError] = useState("");
-  const [recoveryKey, setRecoveryKey] = useState("");
-  const [keyVisible, setKeyVisible] = useState(false);
   const [busy, setBusy] = useState(false);
-  const connected = Boolean(form.configSyncDeviceId && form.configSyncDeviceToken);
+  const connected = Boolean(form.configSyncDeviceId && form.configSyncToken);
 
   const refresh = async () => {
     try {
@@ -3062,13 +3061,6 @@ function ConfigSyncScreen({
     try {
       const response = await invoke<SyncResponse<unknown>>(command, args);
       if (response.status !== "ok") { setSyncError(response.message); return; }
-      if (command === "config_sync_export_key" && typeof response.data === "string") {
-        setRecoveryKey(response.data);
-        setKeyVisible(true);
-      } else if (command === "config_sync_import_key") {
-        setRecoveryKey("");
-        setKeyVisible(false);
-      }
       await refresh();
       if (command === "config_sync_pull_remote") await actions.refreshSettings(true);
     } catch (error) { setSyncError(String(error)); }
@@ -3086,16 +3078,15 @@ function ConfigSyncScreen({
   };
 
   const connect = async () => {
-    if (!form.configSyncServerUrl.trim() || !username.trim() || !password) return;
+    if (!form.configSyncServerUrl.trim() || !token.trim()) return;
     setConnecting(true);
     try {
       await actions.connectConfigSync(
         form.configSyncServerUrl.trim(),
-        username.trim(),
-        password,
+        token.trim(),
         form.configSyncDeviceName.trim() || "Codex++ device",
       );
-      setPassword("");
+      setToken("");
     } finally {
       setConnecting(false);
     }
@@ -3140,19 +3131,11 @@ function ConfigSyncScreen({
             </>
           ) : (
             <>
-              <div className="hint-line"><ShieldCheck className="h-4 w-4" /><span>{syncStatus?.hasRecoveryKey ? t("端到端加密已配置") : t("恢复密钥未配置")}</span></div>
+              <div className="hint-line"><ShieldCheck className="h-4 w-4" /><span>{t("已使用共享令牌加密并认证")}</span></div>
               <Toolbar>
                 <Button disabled={busy || !syncStatus?.enabled} onClick={() => void perform("config_sync_now")}><RefreshCw className="h-4 w-4" />{t("立即同步")}</Button>
                 <Button disabled={busy} onClick={() => void overwrite("push")}><Upload className="h-4 w-4" />{t("推送本地（覆盖服务器）")}</Button>
                 <Button disabled={busy} onClick={() => void overwrite("pull")}><Download className="h-4 w-4" />{t("拉取配置（覆盖本地）")}</Button>
-              </Toolbar>
-              <Field label={t("恢复密钥")}>
-                <Input type={keyVisible ? "text" : "password"} autoComplete="off" value={recoveryKey} onChange={(event) => setRecoveryKey(event.currentTarget.value)} />
-              </Field>
-              <Toolbar>
-                <Button disabled={busy || !syncStatus?.hasRecoveryKey} onClick={() => void perform("config_sync_export_key")}><KeyRound className="h-4 w-4" />{t("显示恢复密钥")}</Button>
-                <Button disabled={busy || !recoveryKey.trim()} onClick={() => void perform("config_sync_import_key", { secret: recoveryKey.trim() })}><Download className="h-4 w-4" />{t("导入恢复密钥")}</Button>
-                <Button variant="secondary" title={t("隐藏恢复密钥")} onClick={() => { setKeyVisible(false); setRecoveryKey(""); }}><Eye className="h-4 w-4" /></Button>
               </Toolbar>
             </>
           )}
@@ -3167,7 +3150,7 @@ type SyncResponse<T> = { status: string; message: string; data: T | null };
 type ConfigSyncState = {
   connected: boolean; enabled: boolean; aligned: boolean;
   localVersion: number; serverVersion: number; lastSync: number | null;
-  error: string; files: number; hasRecoveryKey: boolean;
+  error: string; files: number;
 };
 
 type Actions = {
@@ -3184,7 +3167,7 @@ type Actions = {
   performUpdate: () => Promise<void>;
   saveSettings: () => Promise<void>;
   saveSettingsValue: (settings: BackendSettings, silent?: boolean) => Promise<BackendSettings | null>;
-  connectConfigSync: (serverUrl: string, username: string, password: string, deviceName: string) => Promise<CommandResult<{ deviceId: string; deviceToken: string }> | null>;
+  connectConfigSync: (serverUrl: string, token: string, deviceName: string) => Promise<CommandResult<unknown> | null>;
   configSyncNow: () => Promise<CommandResult<{ uploaded: number; downloaded: number; cursor: number }> | null>;
   configSyncPushLocal: () => Promise<CommandResult<{ files: number; cursor: number }> | null>;
   configSyncPullRemote: () => Promise<CommandResult<{ files: number; cursor: number }> | null>;
@@ -5208,21 +5191,19 @@ function SettingsScreen({
   onFormChange: (value: BackendSettings) => void;
   actions: Actions;
 }) {
-  const [syncUsername, setSyncUsername] = useState("");
-  const [syncPassword, setSyncPassword] = useState("");
+  const [syncToken, setSyncToken] = useState("");
   const [syncConnecting, setSyncConnecting] = useState(false);
 
   const connectSync = async () => {
-    if (!form.configSyncServerUrl.trim() || !syncUsername.trim() || !syncPassword) return;
+    if (!form.configSyncServerUrl.trim() || !syncToken.trim()) return;
     setSyncConnecting(true);
     try {
       await actions.connectConfigSync(
         form.configSyncServerUrl.trim(),
-        syncUsername.trim(),
-        syncPassword,
+        syncToken.trim(),
         form.configSyncDeviceName.trim() || "Codex++ device",
       );
-      setSyncPassword("");
+      setSyncToken("");
     } finally {
       setSyncConnecting(false);
     }
@@ -5263,20 +5244,17 @@ function SettingsScreen({
               <div className="hint-line"><Info className="h-4 w-4" /><span>{tf("已连接设备：{0}", [form.configSyncDeviceId])}</span></div>
             ) : (
               <>
-                <Field label={t("同步账号")}>
-                  <Input autoComplete="username" value={syncUsername} onChange={(event) => setSyncUsername(event.currentTarget.value)} />
-                </Field>
-                <Field label={t("同步密码")}>
-                  <Input autoComplete="current-password" type="password" value={syncPassword} onChange={(event) => setSyncPassword(event.currentTarget.value)} />
+                <Field label={t("服务器令牌")}>
+                  <Input autoComplete="off" type="password" value={syncToken} onChange={(event) => setSyncToken(event.currentTarget.value)} placeholder={t("输入服务器提供的令牌")} />
                 </Field>
                 <Toolbar>
-                  <Button disabled={syncConnecting || !form.configSyncServerUrl.trim() || !syncUsername.trim() || !syncPassword} onClick={() => void connectSync()}>
+                  <Button disabled={syncConnecting || !form.configSyncServerUrl.trim() || !syncToken.trim()} onClick={() => void connectSync()}>
                     {syncConnecting ? t("正在连接…") : t("连接并注册设备")}
                   </Button>
                 </Toolbar>
               </>
             )}
-            <div className="hint-line"><Info className="h-4 w-4" /><span>{t("配置内容会在本机加密后上传；密码仅用于本次设备注册。")}</span></div>
+            <div className="hint-line"><Info className="h-4 w-4" /><span>{t("服务器令牌同时用于认证和端到端加密；客户端会记住这台设备。")}</span></div>
           </div>
           <div className="settings-block">
             <label className="check-row">

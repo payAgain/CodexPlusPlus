@@ -1,6 +1,6 @@
 use codex_plus_core::{
     settings::{BackendSettings, SettingsStore, atomic_write},
-    sync::{SyncClient, SyncClientConfig, engine::{Engine, Operation}},
+    sync::{engine::{Engine, Operation}},
 };
 use std::{path::PathBuf, process::{Child, Command, Stdio}, time::Duration};
 
@@ -10,15 +10,13 @@ impl Drop for Service {
 }
 
 async fn device(root: PathBuf, url: &str, name: &str) -> Engine {
-    let login = SyncClient::login(url, "test-user", "test-password").await.unwrap();
-    let client = SyncClient::new(SyncClientConfig { server_url: url.into(), access_token: login.access_token, device_id: String::new(), device_token: String::new() }).unwrap();
-    let device = client.register_device(name).await.unwrap();
+    let device_id = codex_plus_core::sync::new_device_id();
     let engine = Engine { home: root.join("home"), settings_path: root.join("settings.json"), state_dir: root.join("state") };
     std::fs::create_dir_all(&engine.home).unwrap();
     SettingsStore::new(engine.settings_path.clone()).save(&BackendSettings {
         config_sync_server_url: url.into(),
-        config_sync_device_id: device.device_id,
-        config_sync_device_token: device.device_token,
+        config_sync_device_id: device_id,
+        config_sync_token: "test-shared-token".into(),
         config_sync_device_name: name.into(),
         ..Default::default()
     }).unwrap();
@@ -38,8 +36,7 @@ async fn config_sync_two_devices_overwrite_gate_conflict_and_recovery() {
     let spawn = || Service(Command::new(&binary)
         .env("CONFIG_SYNC_BIND",address.to_string())
         .env("CONFIG_SYNC_DB_PATH",&database)
-        .env("CONFIG_SYNC_BOOTSTRAP_USER","test-user")
-        .env("CONFIG_SYNC_BOOTSTRAP_PASSWORD","test-password")
+        .env("CONFIG_SYNC_SHARED_TOKEN","test-shared-token")
         .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     let service = spawn();
     let url = format!("http://{address}");
@@ -51,13 +48,9 @@ async fn config_sync_two_devices_overwrite_gate_conflict_and_recovery() {
     let b = device(dir.path().join("b"),&url,"device-b").await;
     assert!(a.set_enabled(true).await.is_err());
     assert!(a.execute(Operation::Push).await.unwrap().aligned);
-    let key = a.recovery_key().unwrap();
-    assert!(b.execute(Operation::Pull).await.is_err());
-    assert_eq!(std::fs::read_to_string(b.home.join("config.toml")).unwrap(),"model = 'device-b'\n");
-    b.import_key(key).unwrap();
     assert!(b.execute(Operation::Pull).await.unwrap().aligned);
-    let b_token = SettingsStore::new(b.settings_path.clone()).load().unwrap().config_sync_device_token;
-    assert_ne!(b_token,SettingsStore::new(a.settings_path.clone()).load().unwrap().config_sync_device_token);
+    let b_token = SettingsStore::new(b.settings_path.clone()).load().unwrap().config_sync_token;
+    assert_eq!(b_token,SettingsStore::new(a.settings_path.clone()).load().unwrap().config_sync_token);
     a.set_enabled(true).await.unwrap();
     b.set_enabled(true).await.unwrap();
     let background = tokio::spawn(codex_plus_core::sync::engine::run_background(a.clone()));

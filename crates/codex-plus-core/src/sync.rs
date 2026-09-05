@@ -16,18 +16,9 @@ pub mod engine;
 #[serde(rename_all = "camelCase")]
 pub struct SyncClientConfig {
     pub server_url: String,
-    pub access_token: String,
-    pub device_token: String,
+    pub shared_token: String,
     pub device_id: String,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncLoginResponse { pub access_token: String }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncDeviceResponse { pub device_id: String, pub device_token: String }
 
 #[derive(Debug, Clone)]
 pub struct SyncClient { http: reqwest::Client, config: SyncClientConfig }
@@ -38,27 +29,29 @@ impl SyncClient {
         Ok(Self { http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).redirect(reqwest::redirect::Policy::none()).user_agent("CodexPlusPlus-ConfigSync/2").build()?, config })
     }
     fn url(&self, path: &str) -> String { format!("{}/{}", self.config.server_url.trim_end_matches('/'), path.trim_start_matches('/')) }
-    pub async fn login(server_url: &str, username: &str, password: &str) -> anyhow::Result<SyncLoginResponse> {
-        validate_server_url(server_url)?;
-        Ok(reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).redirect(reqwest::redirect::Policy::none()).build()?.post(format!("{}/v1/auth/login", server_url.trim_end_matches('/'))).json(&serde_json::json!({"username": username, "password": password})).send().await?.error_for_status()?.json().await?)
+    async fn json_response<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> anyhow::Result<T> {
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("同步服务器返回 HTTP {}{}", status.as_u16(), if body.is_empty() { String::new() } else { format!(": {body}") });
+        }
+        Ok(response.json().await?)
     }
-    pub async fn register_device(&self, name: &str) -> anyhow::Result<SyncDeviceResponse> {
-        Ok(self.http.post(self.url("/v1/devices")).bearer_auth(&self.config.access_token).json(&serde_json::json!({"name": name})).send().await?.error_for_status()?.json().await?)
-    }
+    fn auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder { request.bearer_auth(&self.config.shared_token) }
     pub async fn pull(&self, cursor: u64) -> anyhow::Result<serde_json::Value> {
-        Ok(self.http.get(self.url("/v1/sync/changes")).bearer_auth(&self.config.device_token).query(&[("cursor", cursor)]).send().await?.error_for_status()?.json().await?)
+        Self::json_response(self.auth(self.http.get(self.url("/v1/sync/changes"))).query(&[("cursor", cursor)]).send().await?).await
     }
     pub async fn push(&self, change: &SyncChange) -> anyhow::Result<serde_json::Value> {
-        Ok(self.http.post(self.url("/v1/sync/changes")).bearer_auth(&self.config.device_token).json(change).send().await?.error_for_status()?.json().await?)
+        Self::json_response(self.auth(self.http.post(self.url("/v1/sync/changes"))).json(change).send().await?).await
     }
     pub async fn force_push(&self, change: &SyncChange) -> anyhow::Result<serde_json::Value> {
-        Ok(self.http.post(self.url("/v1/sync/force-push")).bearer_auth(&self.config.device_token).json(change).send().await?.error_for_status()?.json().await?)
+        Self::json_response(self.auth(self.http.post(self.url("/v1/sync/force-push"))).json(change).send().await?).await
     }
     pub async fn snapshot(&self) -> anyhow::Result<SyncSnapshot> {
-        Ok(self.http.get(self.url("/v1/sync/state")).bearer_auth(&self.config.device_token).send().await?.error_for_status()?.json().await?)
+        Self::json_response(self.auth(self.http.get(self.url("/v1/sync/state"))).send().await?).await
     }
     pub async fn acknowledge(&self, version: u64, hashes: &BTreeMap<String, Option<String>>) -> anyhow::Result<()> {
-        self.http.post(self.url("/v1/sync/ack")).bearer_auth(&self.config.device_token)
+        self.auth(self.http.post(self.url("/v1/sync/ack")))
             .json(&serde_json::json!({"deviceId":self.config.device_id,"version":version,"hashes":hashes}))
             .send().await?.error_for_status()?;
         Ok(())
