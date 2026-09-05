@@ -79,6 +79,17 @@ Every time upstream commits are triaged, append a record here describing what wa
   git log --oneline f70ec61..upstream/main
   ```
 
+## Upstream Sync Log
+
+As of September 5, 2026, `codex/main` is updated through local commit `5b5a04f` (including the selective upstream fixes and the catalog compatibility fix). This round picked `531275a`, `b43149b`, `4cf4baf`, `f98b4dd`, `0b9beed`, `9796407`, and `7db95f7`.
+
+The large stepwise/floating-panel, skin/sponsor, and unrelated platform/UI series were skipped. Resume with:
+
+```bash
+git fetch upstream
+git log --oneline 7db95f7..upstream/main
+```
+
 ## Installers
 
 This fork does not publish standalone installers. Build the Windows installer locally with `scripts/package-windows.ps1`, or use the [upstream Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases).

@@ -299,6 +299,17 @@ scripts/installer/
   macos/package-dmg.sh          macOS DMG 打包
 ```
 
+## 上游同步记录
+
+截至 2026-09-05，`codex/main` 已同步并提交到本地提交 `5b5a04f`（包含本轮上游修复及 catalog 调用兼容修复）。本轮选择性摘取：`531275a`、`b43149b`、`4cf4baf`、`f98b4dd`、`0b9beed`、`9796407`、`7db95f7`。
+
+已跳过 stepwise/floating-panel 重构、皮肤/赞助资源及无关平台 UI 改动。下次从以下范围继续检查：
+
+```bash
+git fetch upstream
+git log --oneline 7db95f7..upstream/main
+```
+
 ## 开源协议
 
 Copyright (C) 2026 BigPizzaV3
