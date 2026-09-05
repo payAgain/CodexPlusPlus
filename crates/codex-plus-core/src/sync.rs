@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+pub mod engine;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncClientConfig {
@@ -32,11 +34,13 @@ pub struct SyncClient { http: reqwest::Client, config: SyncClientConfig }
 
 impl SyncClient {
     pub fn new(config: SyncClientConfig) -> anyhow::Result<Self> {
-        Ok(Self { http: reqwest::Client::builder().user_agent("CodexPlusPlus-ConfigSync/1").build()?, config })
+        validate_server_url(&config.server_url)?;
+        Ok(Self { http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).redirect(reqwest::redirect::Policy::none()).user_agent("CodexPlusPlus-ConfigSync/2").build()?, config })
     }
     fn url(&self, path: &str) -> String { format!("{}/{}", self.config.server_url.trim_end_matches('/'), path.trim_start_matches('/')) }
     pub async fn login(server_url: &str, username: &str, password: &str) -> anyhow::Result<SyncLoginResponse> {
-        Ok(reqwest::Client::new().post(format!("{}/v1/auth/login", server_url.trim_end_matches('/'))).json(&serde_json::json!({"username": username, "password": password})).send().await?.error_for_status()?.json().await?)
+        validate_server_url(server_url)?;
+        Ok(reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).redirect(reqwest::redirect::Policy::none()).build()?.post(format!("{}/v1/auth/login", server_url.trim_end_matches('/'))).json(&serde_json::json!({"username": username, "password": password})).send().await?.error_for_status()?.json().await?)
     }
     pub async fn register_device(&self, name: &str) -> anyhow::Result<SyncDeviceResponse> {
         Ok(self.http.post(self.url("/v1/devices")).bearer_auth(&self.config.access_token).json(&serde_json::json!({"name": name})).send().await?.error_for_status()?.json().await?)
@@ -50,11 +54,31 @@ impl SyncClient {
     pub async fn force_push(&self, change: &SyncChange) -> anyhow::Result<serde_json::Value> {
         Ok(self.http.post(self.url("/v1/sync/force-push")).bearer_auth(&self.config.device_token).json(change).send().await?.error_for_status()?.json().await?)
     }
+    pub async fn snapshot(&self) -> anyhow::Result<SyncSnapshot> {
+        Ok(self.http.get(self.url("/v1/sync/state")).bearer_auth(&self.config.device_token).send().await?.error_for_status()?.json().await?)
+    }
+    pub async fn acknowledge(&self, version: u64, hashes: &BTreeMap<String, Option<String>>) -> anyhow::Result<()> {
+        self.http.post(self.url("/v1/sync/ack")).bearer_auth(&self.config.device_token)
+            .json(&serde_json::json!({"deviceId":self.config.device_id,"version":version,"hashes":hashes}))
+            .send().await?.error_for_status()?;
+        Ok(())
+    }
     pub fn websocket_url(&self) -> String {
         let base = self.config.server_url.replace("https://", "wss://").replace("http://", "ws://");
         format!("{}/v1/sync/ws", base.trim_end_matches('/'))
     }
 }
+
+fn validate_server_url(raw: &str) -> anyhow::Result<()> {
+    let url = reqwest::Url::parse(raw)?;
+    anyhow::ensure!(url.scheme() == "https" || (url.scheme() == "http" && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))), "同步服务器必须使用 HTTPS");
+    anyhow::ensure!(url.username().is_empty() && url.password().is_none() && url.query().is_none() && url.fragment().is_none(), "服务器地址不能包含凭据、查询参数或片段");
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSnapshot { pub version: u64, pub files: Vec<SyncFile> }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

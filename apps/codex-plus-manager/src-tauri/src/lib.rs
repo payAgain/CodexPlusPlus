@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod install;
+pub mod sync_commands;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -44,6 +45,7 @@ pub fn run() {
             let main_window = main_window_builder.build()?;
             install_tray(app)?;
             commands::start_weixin_connect_from_saved_settings();
+            sync_commands::start_background();
             register_main_window_events(main_window, startup_is_transient());
             Ok(())
         })
@@ -55,12 +57,14 @@ pub fn run() {
             commands::restart_codex_plus,
             commands::load_settings,
             commands::save_settings,
-            commands::config_sync_status,
-            commands::config_sync_login,
-            commands::config_sync_connect,
-            commands::config_sync_now,
-            commands::config_sync_push_local,
-            commands::config_sync_pull_remote,
+            sync_commands::config_sync_status,
+            sync_commands::config_sync_connect,
+            sync_commands::config_sync_now,
+            sync_commands::config_sync_push_local,
+            sync_commands::config_sync_pull_remote,
+            sync_commands::config_sync_set_enabled,
+            sync_commands::config_sync_export_key,
+            sync_commands::config_sync_import_key,
             commands::weixin_connect_qr_start,
             commands::weixin_connect_qr_status,
             commands::weixin_connect_status,

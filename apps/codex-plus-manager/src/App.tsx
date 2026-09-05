@@ -16,7 +16,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   ArrowLeft,
   ArrowRight,
@@ -3029,7 +3029,61 @@ function ConfigSyncScreen({
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<ConfigSyncState | null>(null);
+  const [syncError, setSyncError] = useState("");
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
   const connected = Boolean(form.configSyncDeviceId && form.configSyncDeviceToken);
+
+  const refresh = async () => {
+    try {
+      const response = await invoke<SyncResponse<ConfigSyncState>>("config_sync_status");
+      setSyncStatus(response.data);
+      if (response.status !== "ok") setSyncError(response.message);
+    } catch (error) { setSyncError(String(error)); }
+  };
+
+  useEffect(() => {
+    if (!connected) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      if (!disposed) await refresh();
+      if (!disposed) timer = setTimeout(() => void poll(), 5000);
+    };
+    void poll();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [connected, form.configSyncDeviceId]);
+
+  const perform = async (command: string, args?: Record<string, unknown>) => {
+    setBusy(true);
+    setSyncError("");
+    try {
+      const response = await invoke<SyncResponse<unknown>>(command, args);
+      if (response.status !== "ok") { setSyncError(response.message); return; }
+      if (command === "config_sync_export_key" && typeof response.data === "string") {
+        setRecoveryKey(response.data);
+        setKeyVisible(true);
+      } else if (command === "config_sync_import_key") {
+        setRecoveryKey("");
+        setKeyVisible(false);
+      }
+      await refresh();
+      if (command === "config_sync_pull_remote") await actions.refreshSettings(true);
+    } catch (error) { setSyncError(String(error)); }
+    finally { setBusy(false); }
+  };
+
+  const overwrite = async (direction: "push" | "pull") => {
+    const approved = await confirm(
+      direction === "push"
+        ? t("将以本机完整配置覆盖服务器，包括远端独有配置。确认推送？")
+        : t("将以服务器完整配置覆盖本地，包括本地独有配置。写回前将自动备份，确认拉取？"),
+      { title: t("确认覆盖配置"), kind: "warning" },
+    );
+    if (approved) await perform(direction === "push" ? "config_sync_push_local" : "config_sync_pull_remote", { confirmed: true });
+  };
 
   const connect = async () => {
     if (!form.configSyncServerUrl.trim() || !username.trim() || !password) return;
@@ -3050,18 +3104,22 @@ function ConfigSyncScreen({
   return (
     <>
       <Panel>
-        <CardHead title={t("配置同步")} detail={t("通过自建服务器实时同步 Codex++ 配置")} />
+        <CardHead title={t("配置同步")} detail={syncStatus?.enabled ? t("自动同步已开启") : t("自动同步已暂停")} />
         <CardContent>
           <div className="metric-list">
-            <Metric label={t("连接状态")} value={connected ? t("已连接") : t("未连接")} />
+            <Metric label={t("连接状态")} value={syncStatus?.connected ? t("在线") : connected ? t("已注册") : t("未连接")} />
             <Metric label={t("设备 ID")} value={form.configSyncDeviceId || "-"} />
+            <Metric label={t("本地版本")} value={String(syncStatus?.localVersion ?? "-")} />
+            <Metric label={t("服务器版本")} value={String(syncStatus?.serverVersion ?? "-")} />
+            <Metric label={t("对齐状态")} value={syncStatus?.aligned ? t("已对齐") : t("待对齐")} />
+            <Metric label={t("最后同步")} value={syncStatus?.lastSync ? new Date(syncStatus.lastSync * 1000).toLocaleString() : "-"} />
           </div>
           <label className="check-row">
-            <input checked={form.configSyncEnabled} onChange={(event) => onFormChange({ ...form, configSyncEnabled: event.currentTarget.checked })} type="checkbox" />
+            <input checked={syncStatus?.enabled ?? false} disabled={busy || (!syncStatus?.enabled && !syncStatus?.aligned)} onChange={(event) => void perform("config_sync_set_enabled", { enabled: event.currentTarget.checked })} type="checkbox" />
             <span>{t("启用实时配置同步")}</span>
           </label>
           <Field label={t("同步服务器地址")}>
-            <Input value={form.configSyncServerUrl} onChange={(event) => onFormChange({ ...form, configSyncServerUrl: event.currentTarget.value })} placeholder="https://codexpp.mdyself.com" />
+            <Input disabled={connected} value={form.configSyncServerUrl} onChange={(event) => onFormChange({ ...form, configSyncServerUrl: event.currentTarget.value })} placeholder="https://codexpp.mdyself.com" />
           </Field>
           <Field label={t("设备名称")}>
             <Input value={form.configSyncDeviceName} onChange={(event) => onFormChange({ ...form, configSyncDeviceName: event.currentTarget.value })} placeholder={t("例如：办公室电脑")} />
@@ -3082,19 +3140,35 @@ function ConfigSyncScreen({
             </>
           ) : (
             <>
-              <div className="hint-line"><CheckCircle2 className="h-4 w-4" /><span>{t("设备已注册。配置内容会在本机加密后上传。")}</span></div>
+              <div className="hint-line"><ShieldCheck className="h-4 w-4" /><span>{syncStatus?.hasRecoveryKey ? t("端到端加密已配置") : t("恢复密钥未配置")}</span></div>
               <Toolbar>
-                <Button onClick={() => void actions.configSyncNow()}><RefreshCw className="h-4 w-4" />{t("立即同步")}</Button>
-                <Button onClick={() => void actions.configSyncPushLocal()}><Upload className="h-4 w-4" />{t("推送本地")}</Button>
-                <Button onClick={() => void actions.configSyncPullRemote()}><Download className="h-4 w-4" />{t("拉取配置")}</Button>
+                <Button disabled={busy || !syncStatus?.enabled} onClick={() => void perform("config_sync_now")}><RefreshCw className="h-4 w-4" />{t("立即同步")}</Button>
+                <Button disabled={busy} onClick={() => void overwrite("push")}><Upload className="h-4 w-4" />{t("推送本地（覆盖服务器）")}</Button>
+                <Button disabled={busy} onClick={() => void overwrite("pull")}><Download className="h-4 w-4" />{t("拉取配置（覆盖本地）")}</Button>
+              </Toolbar>
+              <Field label={t("恢复密钥")}>
+                <Input type={keyVisible ? "text" : "password"} autoComplete="off" value={recoveryKey} onChange={(event) => setRecoveryKey(event.currentTarget.value)} />
+              </Field>
+              <Toolbar>
+                <Button disabled={busy || !syncStatus?.hasRecoveryKey} onClick={() => void perform("config_sync_export_key")}><KeyRound className="h-4 w-4" />{t("显示恢复密钥")}</Button>
+                <Button disabled={busy || !recoveryKey.trim()} onClick={() => void perform("config_sync_import_key", { secret: recoveryKey.trim() })}><Download className="h-4 w-4" />{t("导入恢复密钥")}</Button>
+                <Button variant="secondary" title={t("隐藏恢复密钥")} onClick={() => { setKeyVisible(false); setRecoveryKey(""); }}><Eye className="h-4 w-4" /></Button>
               </Toolbar>
             </>
           )}
+          {(syncError || syncStatus?.error) && <p role="alert" className="field-hint">{syncError || syncStatus?.error}</p>}
         </CardContent>
       </Panel>
     </>
   );
 }
+
+type SyncResponse<T> = { status: string; message: string; data: T | null };
+type ConfigSyncState = {
+  connected: boolean; enabled: boolean; aligned: boolean;
+  localVersion: number; serverVersion: number; lastSync: number | null;
+  error: string; files: number; hasRecoveryKey: boolean;
+};
 
 type Actions = {
   refreshCurrent: () => Promise<void>;
@@ -5176,8 +5250,8 @@ function SettingsScreen({
           <div className="settings-block">
             <div className="section-title-row"><strong>{t("配置同步")}</strong><span>{t("通过自建服务器实时同步 Codex++ 配置")}</span></div>
             <label className="check-row">
-              <input checked={form.configSyncEnabled} onChange={(event) => onFormChange({ ...form, configSyncEnabled: event.currentTarget.checked })} type="checkbox" />
-              <span>{t("启用实时配置同步")}</span>
+              <input checked={false} disabled type="checkbox" />
+              <span>{t("自动同步状态请见配置同步页面")}</span>
             </label>
             <Field label={t("同步服务器地址")}>
               <Input value={form.configSyncServerUrl} onChange={(event) => onFormChange({ ...form, configSyncServerUrl: event.currentTarget.value })} placeholder="https://sync.example.com" />

@@ -4,6 +4,11 @@ services:
       context: ../../..
       dockerfile: services/config-sync/Dockerfile
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       CONFIG_SYNC_BIND: 0.0.0.0:8080
       CONFIG_SYNC_DB_PATH: /var/lib/codex-config-sync/sync.sqlite
